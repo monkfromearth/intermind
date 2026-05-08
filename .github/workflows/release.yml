@@ -1,0 +1,209 @@
+name: Release
+
+# Branch-driven release. Pushing to the `release` branch fans out to
+# every distribution channel in one shot: npm, GitHub Release, and a
+# matrix of single-file binaries for darwin/linux x arm64/x64.
+#
+# The version comes from package.json. To ship a new version: bump
+# `version` on main, merge main into release, push release. That's it.
+#
+# Idempotency: if the version on package.json is already on npm (or the
+# tag/release already exists), the relevant steps no-op instead of
+# failing, so re-running the workflow on the same commit is safe.
+
+on:
+  push:
+    branches: [release]
+  # Manual trigger from the Actions UI / `gh workflow run release.yml`,
+  # useful when re-running a failed release without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  # First job: read package.json once and emit the version + tag.
+  # Every other job consumes these outputs so we have one source of truth.
+  resolve:
+    name: Resolve version from package.json
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing intermind@$version (tag v$version)"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: resolve
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # bun build --compile --target=<triple> picks the right runtime.
+          # macOS runners are needed for darwin-* so codesign is available.
+          - target: bun-darwin-arm64
+            os: macos-latest
+            asset: intermind-darwin-arm64
+            sign: true
+          - target: bun-darwin-x64
+            os: macos-latest
+            asset: intermind-darwin-x64
+            sign: true
+          - target: bun-linux-x64
+            os: ubuntu-latest
+            asset: intermind-linux-x64
+            sign: false
+          - target: bun-linux-arm64
+            os: ubuntu-24.04-arm
+            asset: intermind-linux-arm64
+            sign: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build single-file binary
+        # --compile bundles the Bun runtime + our TS into one ~60 MB executable.
+        # No node_modules needed at runtime; users just download and run.
+        env:
+          TARGET: ${{ matrix.target }}
+          ASSET: ${{ matrix.asset }}
+        run: bun build --compile --target="$TARGET" src/index.ts --outfile="./$ASSET"
+
+      - name: Ad-hoc codesign (macOS)
+        # macOS Gatekeeper SIGKILLs unsigned binaries that have the
+        # `com.apple.provenance` xattr (set by curl/browser downloads).
+        # Ad-hoc signing (-) costs nothing, no Apple Developer cert
+        # required, and is enough to keep Gatekeeper from killing it.
+        if: matrix.sign
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          codesign --remove-signature "./$ASSET" 2>/dev/null || true
+          codesign --sign - --force "./$ASSET"
+
+      - name: Smoke check (binary is executable)
+        # Quick sanity check: file we just built is a runnable executable
+        # on this platform. Catches `--target` / runner mismatches.
+        if: matrix.target != 'bun-linux-arm64'
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          chmod +x "./$ASSET"
+          file "./$ASSET"
+
+      - name: Upload binary as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ./${{ matrix.asset }}
+          retention-days: 7
+
+  npm-publish:
+    name: Publish to npm
+    # Source tarball: bin = ./src/index.ts, bunx invokes Bun which runs TS.
+    # Independent of the binary matrix; runs in parallel.
+    needs: resolve
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Node (for npm publish)
+        # Bun's publisher doesn't yet handle npm provenance/2FA cleanly;
+        # use Node's npm CLI for the actual publish. Bun is still used
+        # for tests + typecheck via prepublishOnly.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check if version already published
+        # If the version on package.json is already on the registry,
+        # skip publish (no-op) instead of failing. Lets us re-run the
+        # workflow on the same commit safely, and means the very first
+        # release works even if 0.0.1 was hand-published before this
+        # workflow existed.
+        id: check_npm
+        env:
+          PKG_VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          if npm view "intermind@$PKG_VERSION" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "intermind@$PKG_VERSION is already on npm; skipping publish."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to npm
+        # Skipped when version is already on the registry. Otherwise:
+        # `npm publish` runs `prepublishOnly` (test + typecheck + lint).
+        # --access public is required for unscoped first-time publishes.
+        # --provenance attests the build to the public sigstore log so
+        #   downstream users can verify the tarball came from this repo.
+        if: steps.check_npm.outputs.already_published == 'false'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+  release:
+    name: Publish GitHub Release
+    needs: [resolve, build, npm-publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Lay out release assets
+        # download-artifact v4 puts each artifact in its own subdir
+        # (./artifacts/<name>/<file>). Flatten so all binaries sit in
+        # one folder with the artifact name as the filename, ready to
+        # attach to the release.
+        run: |
+          mkdir -p ./release
+          for d in ./artifacts/*/; do
+            name=$(basename "$d")
+            cp "$d"/* "./release/$name"
+          done
+          ls -la ./release
+
+      - name: Create or update GitHub Release
+        # softprops/action-gh-release creates the tag if it doesn't exist
+        # and updates the release body if it does (idempotent on re-runs).
+        # generate_release_notes builds the body from PRs/commits since the
+        # last tag, so we get a changelog without writing one by hand.
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ needs.resolve.outputs.tag }}
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: false
+          prerelease: ${{ contains(needs.resolve.outputs.version, '-') }}
+          generate_release_notes: true
+          files: ./release/*

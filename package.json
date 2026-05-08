@@ -1,0 +1,65 @@
+{
+  "name": "intermind",
+  "version": "0.0.1",
+  "description": "MCP server that lets coding agents hold threaded conversations with each other. Pair programming for AI agents.",
+  "license": "MIT",
+  "author": {
+    "name": "monkfromearth",
+    "url": "https://monkfrom.earth"
+  },
+  "homepage": "https://github.com/monkfromearth/intermind#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/monkfromearth/intermind.git"
+  },
+  "bugs": {
+    "url": "https://github.com/monkfromearth/intermind/issues"
+  },
+  "type": "module",
+  "module": "src/index.ts",
+  "main": "src/index.ts",
+  "bin": {
+    "intermind": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "docs/logos",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai-agents",
+    "coding-agents",
+    "claude-code",
+    "codex",
+    "agent-collaboration",
+    "bun",
+    "sqlite"
+  ],
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "typecheck": "bunx tsc --noEmit",
+    "lint": "oxlint src test scripts",
+    "build:binary": "bun build --compile src/index.ts --outfile=./bin/intermind && codesign --remove-signature ./bin/intermind 2>/dev/null; codesign --sign - --force ./bin/intermind",
+    "prepublishOnly": "bun test && bun run typecheck && bun run lint"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0 || ^4.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "oxlint": "^1.63.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
