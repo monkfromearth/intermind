@@ -32,13 +32,18 @@ interface E2EHarness {
   close: () => Promise<void>;
 }
 
+interface HarnessOptions {
+  /** Optional dbPath to thread through buildServer (for hint tests). */
+  dbPath?: string;
+}
+
 /**
  * Build a fresh in-memory Intermind server, connect a real MCP client
  * to it, and return both. Every test gets its own isolated DB.
  */
-async function makeHarness(): Promise<E2EHarness> {
+async function makeHarness(opts: HarnessOptions = {}): Promise<E2EHarness> {
   const db = openDatabase(":memory:");
-  const server = buildServer(db);
+  const server = buildServer(db, { dbPath: opts.dbPath });
 
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -319,6 +324,69 @@ describe("wait_for_reply end-to-end", () => {
     );
     expect(out.timeout).toBe(true);
     expect(out.message).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* empty-room hint                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("empty-room hint on register_agent", () => {
+  test("first agent gets a hint with the dbPath when one is configured", async () => {
+    // Custom harness so we can pass an explicit dbPath. The hint embeds
+    // this path so a freshly registered agent can see exactly which file
+    // a peer would need to share.
+    const local = await makeHarness({ dbPath: "/tmp/test-intermind.db" });
+    try {
+      const reg = await call<{
+        room_size: number;
+        hint?: string;
+      }>(local.client, "register_agent", {
+        display_name: "Solo",
+        role: "x",
+      });
+
+      // Alone in the room → room_size: 0 and hint mentions the dbPath
+      // plus the INTERMIND_DB env var so the user knows the lever.
+      expect(reg.room_size).toBe(0);
+      expect(reg.hint).toBeDefined();
+      expect(reg.hint).toContain("/tmp/test-intermind.db");
+      expect(reg.hint).toContain("INTERMIND_DB");
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("second agent gets no hint because the room isn't empty", async () => {
+    const local = await makeHarness({ dbPath: "/tmp/test-intermind.db" });
+    try {
+      await call(local.client, "register_agent", {
+        display_name: "First",
+        role: "x",
+      });
+      const second = await call<{ room_size: number; hint?: string }>(
+        local.client,
+        "register_agent",
+        { display_name: "Second", role: "x" },
+      );
+
+      expect(second.room_size).toBe(1);
+      expect(second.hint).toBeUndefined();
+    } finally {
+      await local.close();
+    }
+  });
+
+  test("no hint when buildServer is called without a dbPath", async () => {
+    // Default harness — no dbPath passed. Even alone, no hint, because
+    // we'd have nothing useful to put in the message.
+    const reg = await call<{ room_size: number; hint?: string }>(
+      harness.client,
+      "register_agent",
+      { display_name: "Solo", role: "x" },
+    );
+    expect(reg.room_size).toBe(0);
+    expect(reg.hint).toBeUndefined();
   });
 });
 

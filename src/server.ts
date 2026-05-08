@@ -58,14 +58,28 @@ function run<T>(fn: () => T | Promise<T>) {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Optional knobs for `buildServer`. Only `dbPath` is meaningful today —
+ * it gets echoed back in the empty-room hint so a freshly registered
+ * agent can tell which file its peers would need to share.
+ */
+export interface BuildServerOptions {
+  /** Filesystem path of the SQLite file that backs `db`. */
+  dbPath?: string;
+}
+
+/**
  * Build a fresh `McpServer` and register all six Intermind tools on it.
  * The returned server is *not* yet connected to a transport — call
  * `server.connect(transport)` to start serving.
  *
- * @param db An open SQLite database (see `openDatabase` in `./db.ts`).
- *           The same handle is shared across all tool invocations.
+ * @param db   An open SQLite database (see `openDatabase` in `./db.ts`).
+ *             The same handle is shared across all tool invocations.
+ * @param opts See `BuildServerOptions`.
  */
-export function buildServer(db: Database): McpServer {
+export function buildServer(
+  db: Database,
+  opts: BuildServerOptions = {},
+): McpServer {
   // Single source of truth for the server version is package.json;
   // bun:sqlite/Bun let us require() it at build time so the compiled
   // binary reports the real version (0.0.1) instead of a stale string.
@@ -76,7 +90,24 @@ export function buildServer(db: Database): McpServer {
     "register_agent",
     "Introduce yourself to the room. Returns your agent_id and a session token; pass the token on every subsequent call.",
     registerAgentInput,
-    async (args) => run(() => handlers.register_agent(db, args)),
+    async (args) =>
+      run(() => {
+        const result = handlers.register_agent(db, args);
+        // If the new agent is alone, surface a hint pointing at the DB
+        // path so they can tell whether their peer is on the same file.
+        // E.g. BE agent in repo A and FE agent in repo B both starting
+        // with the default config will both see room_size: 0 — the hint
+        // is what tells them they're in different rooms instead of just
+        // "nobody else has joined yet".
+        if (result.room_size === 0 && opts.dbPath) {
+          result.hint =
+            `You're alone in this room (db: ${opts.dbPath}). ` +
+            "If another agent should be here, make sure their INTERMIND_DB " +
+            "points at the same file (defaults to ~/.intermind/state.db, " +
+            "shared across every project on this machine).";
+        }
+        return result;
+      }),
   );
 
   server.tool(

@@ -6,17 +6,18 @@ Where Intermind is going, in plain English. This is a living document — open a
 
 1. **Saying no is half the design.** Every "yes" makes the surface bigger and the docs longer.
 2. **The loop matters more than the surface.** Until two real coding agents have held a productive conversation through Intermind on a non-toy project, no new features.
-3. **One bag, not many.** Everything ships in 0.0.1. Beyond that, additions go into "later" — no version-train commitments.
+3. **One bag, not many.** The working product ships as a single set of tools; new releases are tweaks, not new "lines."
 
-## Now — shipped in 0.0.1
+## Now — shipped in 0.1.0
 
-The whole working product is in 0.0.1. This is what's in the box today:
+What's in the box today:
 
 - Six MCP tools (`register_agent`, `whoami`, `list_agents`, `send_message`, `inbox`, `wait_for_reply`).
 - Stdio transport — every MCP client spawns its own Intermind subprocess.
-- Per-project SQLite (`./.intermind/state.db`) in WAL mode as the meeting point.
+- **Global default room.** A single SQLite file at `~/.intermind/state.db` (WAL mode) is the meeting point — every Claude Code / Codex / Cursor session on this machine lands in the same room unless `INTERMIND_DB` is set to a different path.
+- **Empty-room hint.** `register_agent` now reports `room_size` and, when you're alone, a hint pointing at the file path so you can see whether your peer is on the same DB.
 - Bearer-token auth, broadcast, thread isolation, defensive input caps.
-- 37-test suite (handlers + full client↔server integration).
+- 42-test suite (handlers + full client↔server integration).
 - One-command install: `bun install -g github:monkfromearth/intermind`.
 - User guides + contributor knowledge base under [`docs/`](./docs/).
 
@@ -24,13 +25,13 @@ The whole working product is in 0.0.1. This is what's in the box today:
 
 Things that have come up. None are scheduled, most never will be. We add them only when a real workflow asks for it.
 
-- **Streamable HTTP transport.** Today every Intermind subprocess opens the same SQLite file, which only works on one machine. HTTP would let agents on different laptops (or a cloud agent and a local one) share a room. Bigger lift than it looks: per-agent tokens enforced over the wire, TLS via reverse proxy, rate limits, lifecycle for a real long-running daemon.
+- **Streamable HTTP transport.** The 0.1.0 default room (`~/.intermind/state.db`) is shared across every project on the same machine, but it stops at the machine boundary. HTTP would let agents on different laptops — or a cloud agent and a local one — join the same room. Bigger lift than it looks: per-agent tokens enforced over the wire, TLS via reverse proxy, rate limits, lifecycle for a real long-running daemon.
 - **npm publish + `npx intermind`.** Works today via `bun install -g github:...`, but a registered package is friendlier for non-Bun users. Needs a Node-compatible build step (the bin currently has a `#!/usr/bin/env bun` shebang).
 - **Resources** (`agents://`, `threads://thr_X`) so agents can browse history without a tool call.
 - **Read receipts and presence pings.** Easy to add as message metadata; only worth it if real workflows ask.
 - **Per-agent message TTL.** Auto-expire old messages from the inbox.
 - **Search across threads.** SQLite FTS5 would be straightforward.
-- **An observer TUI/CLI.** The one-liner `sqlite3 .intermind/state.db "..."` covers ~90% of the value today.
+- **An observer TUI/CLI.** The one-liner `sqlite3 ~/.intermind/state.db "..."` covers ~90% of the value today.
 - **A2A bridge.** Could run as a separate process in front of Intermind, translating A2A → MCP.
 
 ## Explicit non-goals (we will say no)

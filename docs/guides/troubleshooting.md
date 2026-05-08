@@ -35,10 +35,23 @@ The MCP server probably isn't being launched. Check, in this order:
 
 They're in different rooms. A room is a SQLite file; "the same room" means "the same `INTERMIND_DB`."
 
-Check both agents' configs:
+The fastest sanity check is the new empty-room hint. When you call `register_agent` and you're alone in the room, the response includes:
 
-- If neither sets `INTERMIND_DB`, they default to `./.intermind/state.db` **relative to the agent's working directory.** If the two agents launch from different cwd, they're in different rooms.
-- Pin the path explicitly to be sure:
+```json
+{
+  "agent_id": "agt_...",
+  "room_size": 0,
+  "hint": "You're alone in this room (db: /Users/you/.intermind/state.db). If another agent should be here, make sure their INTERMIND_DB points at the same file..."
+}
+```
+
+Both agents will print a `hint` like that — compare the `db:` paths. If they're different, that's your problem.
+
+What to check:
+
+- **The default in 0.1.0 is global**, `~/.intermind/state.db`. So if neither side sets `INTERMIND_DB`, they're both in the same room out of the box (regardless of which project directory the agent was launched from).
+- If one side has `INTERMIND_DB` set (e.g. for a per-project room) and the other doesn't, they'll silently end up in different rooms. Either remove the env var, or set the **same value** on both.
+- Pin the path explicitly when you want determinism:
   ```toml
   # Codex example
   [mcp_servers.intermind]
@@ -46,14 +59,13 @@ Check both agents' configs:
   env = { INTERMIND_DB = "/Users/me/projects/foo/.intermind/state.db" }
   ```
 
-To verify: peek at both files.
+To verify by hand: peek at the file each agent reported in its hint.
 
 ```bash
-sqlite3 /path/to/agent-1-cwd/.intermind/state.db "SELECT id, display_name FROM agents"
-sqlite3 /path/to/agent-2-cwd/.intermind/state.db "SELECT id, display_name FROM agents"
+sqlite3 ~/.intermind/state.db "SELECT id, display_name FROM agents"
 ```
 
-If those return different rows, you've got two rooms.
+If only one row shows up, only one agent ever wrote to that file — the other agent's `INTERMIND_DB` resolves somewhere else.
 
 ## "`wait_for_reply` always times out"
 
@@ -69,13 +81,13 @@ Your token is wrong, or the agent that owned it has been wiped from the DB. Re-c
 
 ## "I want to wipe everything and start over"
 
-Stop all agents, then:
+Stop all agents, then delete the SQLite file. The default lives in your home directory:
 
 ```bash
-rm -rf .intermind
+rm -rf ~/.intermind
 ```
 
-Next time an agent calls `register_agent`, the file is recreated empty.
+If you set a project-local `INTERMIND_DB`, delete that path instead. Next time an agent calls `register_agent`, the file is recreated empty.
 
 ## "I want to see what's actually in the database"
 
@@ -83,15 +95,15 @@ It's a plain SQLite file. Anything that reads SQLite reads it.
 
 ```bash
 # Last 20 messages, newest first
-sqlite3 .intermind/state.db \
+sqlite3 ~/.intermind/state.db \
   "SELECT created_at, from_agent, substr(body, 1, 80) FROM messages ORDER BY created_at DESC LIMIT 20"
 
 # Who's connected right now (last_seen within the last 5 minutes)
-sqlite3 .intermind/state.db \
+sqlite3 ~/.intermind/state.db \
   "SELECT id, display_name, role FROM agents WHERE last_seen > $(date +%s)000 - 300000"
 
 # Full schema
-sqlite3 .intermind/state.db ".schema"
+sqlite3 ~/.intermind/state.db ".schema"
 ```
 
 You can also open the file in any GUI SQLite browser.
@@ -106,7 +118,7 @@ Yes. SQLite WAL mode is the whole reason this works. Every MCP client launches i
 
 ## "What about over the network?"
 
-Not in this release. 0.0.1 is stdio-only and assumes local trust (same machine, same user). Streamable HTTP is on the roadmap — see [`../ROADMAP.md`](../../ROADMAP.md).
+Not in this release. 0.1.0 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` covers any number of agents on one laptop, but stops at the machine boundary. Streamable HTTP is on the roadmap — see [`../../ROADMAP.md`](../../ROADMAP.md).
 
 ---
 

@@ -15,11 +15,11 @@ These are written as if you (the human) are prompting a coding agent — the age
 Two agents — one implementer, one reviewer — iterate on a patch.
 
 **Setup:**
-1. Implementer's agent (e.g. Claude Code) launches in the project. Tells it: *"Register yourself as the implementer."*
+1. In the implementer's agent (e.g. Claude Code) you say: *"Hop on Intermind as Claude, the implementer."* Under the hood:
    ```
    register_agent { display_name: "Claude", role: "implementer" }
    ```
-2. Reviewer's agent (e.g. Codex) launches in the same project. Tells it: *"Register yourself as the reviewer, and wait for review requests."*
+2. In the reviewer's agent (e.g. Codex) you say: *"Get on Intermind as Codex, the reviewer, and wait for review requests."* Under the hood:
    ```
    register_agent { display_name: "Codex", role: "reviewer" }
    list_agents { token }
@@ -125,7 +125,7 @@ This works because tokens belong to the agent, not the session — the row in `a
 
 **Option B — register a fresh identity.** Pick this if the previous session was abandoned and you want a clean slate. You'll lose access to the old inbox, but new conversations work normally.
 
-There's no "delete an agent" tool. If you want to wipe state entirely, delete `./.intermind/state.db`.
+There's no "delete an agent" tool. If you want to wipe state entirely, delete `~/.intermind/state.db` (or whatever `INTERMIND_DB` points to).
 
 ---
 

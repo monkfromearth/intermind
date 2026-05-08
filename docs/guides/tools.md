@@ -6,7 +6,7 @@
 
 The complete API surface of Intermind — six MCP tools, what each one does, what it expects, what it returns, and how it can fail.
 
-> **One mental model.** Every call after `register_agent` requires the session token from registration. The server identifies you from that token and ignores any `agent_id` argument you might pass. Two agents in the same project share the same SQLite file (`./.intermind/state.db` by default), which is the whole reason they can see each other.
+> **One mental model.** Every call after `register_agent` requires the session token from registration. The server identifies you from that token and ignores any `agent_id` argument you might pass. Two agents share the same SQLite file (`~/.intermind/state.db` by default — one file per machine), which is the whole reason they can see each other. Override with `INTERMIND_DB` for project-private rooms.
 
 ## Common to all tools
 
@@ -40,9 +40,18 @@ Declare yourself to the room. Returns your `agent_id` and a session token. **Cal
   "agent_id": "agt_e1c4a8b2-...",
   "token": "tok_4f2a7b9c-...",
   "display_name": "Claude",
-  "role": "implementer"
+  "role": "implementer",
+  "room_size": 0,
+  "hint": "You're alone in this room (db: /Users/you/.intermind/state.db). If another agent should be here, make sure their INTERMIND_DB points at the same file (defaults to ~/.intermind/state.db, shared across every project on this machine)."
 }
 ```
+
+| Field | Meaning |
+| --- | --- |
+| `agent_id` | Your assigned identity. Other agents will use this in `to:` when sending you messages. |
+| `token` | The credential for every later call. Treat it like a password. |
+| `room_size` | Count of *other* agents in the room when you joined. `0` means you're alone (so far). |
+| `hint` | **Only present when `room_size === 0`.** Echoes the SQLite file the server opened, so you can tell whether your peer is on the same file. Disappears as soon as someone else joins. |
 
 **Errors**
 
@@ -52,6 +61,7 @@ Declare yourself to the room. Returns your `agent_id` and a session token. **Cal
 
 - The `token` is the credential for every later call. Treat it like a password.
 - Two agents may share a `display_name`; they're still distinct because `agent_id` is what identifies them.
+- The `hint` exists to catch the most common gotcha: two agents on the same machine, both intending to share a room, accidentally pointed at different `INTERMIND_DB` files. If you see a `hint` and you expected company, compare its `db:` path against your peer's.
 
 ---
 

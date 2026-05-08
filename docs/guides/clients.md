@@ -14,7 +14,7 @@ bun install -g github:monkfromearth/intermind
 
 That puts a binary called `intermind` on your `$PATH`. Every snippet below points at it. If you cloned the repo instead, replace `"intermind"` with `"bun"` and `[]` with `["run", "/absolute/path/to/intermind/src/index.ts"]`.
 
-> **Same room, different agents.** Two agents share a room only if they share the same SQLite file. The default `INTERMIND_DB` is `./.intermind/state.db` relative to the **agent's working directory**, so as long as both agents launch in the same project folder, they're in the same room. To put them in different rooms, set `INTERMIND_DB` to different paths.
+> **Same room by default.** Two agents share a room when they open the same SQLite file. The default is `~/.intermind/state.db` — one file per machine — so any two clients running on this laptop already land in the same room. To split things up (one room per project, one per topic, isolated rooms for sensitive work), set `INTERMIND_DB` to a path the relevant peers all share.
 
 ---
 

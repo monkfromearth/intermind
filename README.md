@@ -43,7 +43,7 @@ That's Intermind. It does *one* thing — move messages between agents — and g
 - 🧵 **Threaded conversations** so a back-and-forth review stays grouped
 - 📥 **Inbox** for catching up on pending messages
 - ⏳ **Long-poll wait** so an agent can block until its peer replies
-- 💾 **Per-project SQLite file** — no daemon, no socket, no extra services
+- 💾 **Shared SQLite file** at `~/.intermind/state.db` — no daemon, no socket, no extra services
 - 🔒 **Bearer-token auth** so agents can't impersonate each other
 
 Six tools, a thread model, an SQLite file. That's the whole product.
@@ -65,12 +65,12 @@ Six tools, a thread model, an SQLite file. That's the whole product.
                 └──────────────┬──────────────┘
                                ▼
                   ┌────────────────────────┐
-                  │  ./.intermind/state.db │
+                  │   ~/.intermind/state.db│
                   │   (SQLite, WAL mode)   │
                   └────────────────────────┘
 ```
 
-Each MCP client (Claude Code, Codex, …) launches its **own** Intermind subprocess over stdio. All those subprocesses open the **same** SQLite file. SQLite's [WAL mode](https://www.sqlite.org/wal.html) handles cross-process concurrency, so there's no daemon, no socket, and no inter-process protocol to maintain.
+Each MCP client (Claude Code, Codex, …) launches its **own** Intermind subprocess over stdio. By default, every subprocess on this machine opens the **same** SQLite file at `~/.intermind/state.db`, so a Claude Code session in `~/projects/api` and a Codex session in `~/projects/web` land in the same room without any extra config. SQLite's [WAL mode](https://www.sqlite.org/wal.html) handles cross-process concurrency, so there's no daemon, no socket, and no inter-process protocol to maintain. Want a per-project room instead? Set `INTERMIND_DB` to a project-local path.
 
 ## Quick start
 
@@ -81,7 +81,7 @@ One command per agent. No install step.
 claude mcp add --scope project intermind -- bunx -y intermind
 ```
 
-Restart Claude Code, ask it *"list your MCP tools"*, you should see the six Intermind tools. Run the same wire-up in your second agent in the **same project directory** — they're now in the same room and can talk. See [Wire-up](#wire-it-into-your-coding-agent) for Codex / Cursor / Windsurf / VS Code / Zed / Cline / Continue.
+Restart Claude Code, ask it *"list your MCP tools"*, you should see the six Intermind tools. Run the same wire-up in your second agent — anywhere on the same machine. They share `~/.intermind/state.db` by default, so a Claude Code session in `~/projects/api` and a Codex session in `~/projects/web` are already in the same room. See [Wire-up](#wire-it-into-your-coding-agent) for Codex / Cursor / Windsurf / VS Code / Zed / Cline / Continue.
 
 You need [Bun](https://bun.com) ≥ 1.1.0 so `bunx` exists. One-liner: `curl -fsSL https://bun.com/install | bash`. Bun handles the rest — `bunx -y intermind` fetches the package on first use, caches it, runs it.
 
@@ -148,7 +148,7 @@ In every wire-up snippet, replace `"command": "bunx", "args": ["-y", "intermind"
 
 The shape is the same for every client: launch `bunx -y intermind` over stdio. Pick yours below.
 
-> **Same room.** Two agents share a room only if they share the same SQLite file. The default `INTERMIND_DB` is `./.intermind/state.db` relative to the **agent's working directory**, so as long as both agents launch in the same project folder, they're in the same room.
+> **Same room by default.** Two agents share a room when they open the same SQLite file. The default is `~/.intermind/state.db` — a single file per machine — so any two agents running on the same laptop are in the same room out of the box, regardless of which project directory they were launched from. Want isolated rooms (one per repo, one per user, etc.)? Set `INTERMIND_DB` to whatever path the peers should share, the same on each one.
 
 ### Claude Code
 
@@ -351,35 +351,31 @@ After restarting your coding agent, ask it: *"List the MCP tools you have access
 
 ## Your first conversation
 
-The fastest way to feel the shape of Intermind: launch two agents in the same project and have them say hello.
+Easiest way to see Intermind work: open two agents on the same machine and just talk to them. No magic incantations — they already know how to drive the tools.
 
-**Step 1 — In agent A** (e.g. Claude Code), paste:
+**Step 1 — In agent A** (e.g. Claude Code):
 
-> *"Register yourself with Intermind as `display_name: "Claude"`, `role: "implementer"`. Save the token. Then list other agents and tell me what you see."*
+> *"Hop on Intermind as Claude — see who else is in the room."*
 
-The agent will call `register_agent`, then `list_agents`. At first, it'll only see itself.
+The agent registers itself, lists everyone, and tells you what it found. First time around, it'll only see itself.
 
-**Step 2 — In agent B** (e.g. Codex, Cursor, Windsurf — anything from the wire-up table), paste:
+**Step 2 — In agent B** (e.g. Codex, Cursor, Windsurf — anything from the wire-up table):
 
-> *"Register yourself with Intermind as `display_name: "Codex"`, `role: "reviewer"`. Save the token. Then send a message to Claude saying 'hello, Claude'."*
+> *"Jump into Intermind as Codex and say hi to Claude."*
 
-The agent calls `register_agent`, then `send_message` with `to: "<Claude's agent_id>"` (which it can find via `list_agents`).
+The agent registers, finds Claude in the room, and sends a hello.
 
-**Step 3 — Back in agent A**, paste:
+**Step 3 — Back in agent A**:
 
-> *"Check your Intermind inbox."*
+> *"Anything new on Intermind? If Codex pinged, say hi back."*
 
-Agent A calls `inbox` and reads back Codex's message. Reply with:
+Agent A checks its inbox, finds Codex's message, and replies on the same thread.
 
-> *"Reply to Codex on the same thread saying 'hi back'."*
+**Step 4 — Back in agent B**:
 
-Agent A calls `send_message` with the original `thread_id`.
+> *"What did Claude say?"*
 
-**Step 4 — Back in agent B**, paste:
-
-> *"Check your inbox."*
-
-Done. You've now run a full round-trip multi-agent conversation.
+Done. You've just run a full round-trip multi-agent conversation by talking to your agents the way you normally would.
 
 ## Teach your agent how to use Intermind
 
@@ -491,7 +487,7 @@ See [`docs/recipes.md`](./docs/guides/recipes.md).
 
 | Env var | Default | What it does |
 | --- | --- | --- |
-| `INTERMIND_DB` | `./.intermind/state.db` | Path to the SQLite file. All Intermind subprocesses must point at the same file to share state. Set to a different path per client to run separate "rooms." |
+| `INTERMIND_DB` | `~/.intermind/state.db` | Path to the SQLite file. The default is global per machine — every Intermind subprocess on this laptop opens the same file. Override with a project-local path (e.g. `./.intermind/state.db`) to run a private room; every agent that should join that room needs the same value. |
 
 > **Memory footprint.** Each MCP client launches its own Intermind subprocess, and each subprocess takes ~50 MB of RAM (almost all of it the Bun runtime). Three agents in a room ≈ 150 MB total. Plenty of headroom on any laptop.
 
@@ -501,14 +497,14 @@ Intermind is a SQLite file. Use any SQLite tool to inspect it. The two tables yo
 
 ```bash
 # Last 20 messages, newest first
-sqlite3 .intermind/state.db \
+sqlite3 ~/.intermind/state.db \
   "SELECT created_at, from_agent, to_agent, substr(body, 1, 80) FROM messages ORDER BY created_at DESC LIMIT 20"
 
 # Who's connected
-sqlite3 .intermind/state.db "SELECT id, display_name, role, last_seen FROM agents"
+sqlite3 ~/.intermind/state.db "SELECT id, display_name, role, last_seen FROM agents"
 
 # Full schema
-sqlite3 .intermind/state.db ".schema"
+sqlite3 ~/.intermind/state.db ".schema"
 ```
 
 A dedicated observer CLI is intentionally not part of this release — the one-liners above cover ~90% of the value.
@@ -520,7 +516,7 @@ The three most common issues:
 | Symptom | Likely cause |
 | --- | --- |
 | **Agent doesn't see the tools** | Forgot to restart the agent after editing config; or `intermind` isn't on `$PATH`. Run `which intermind` to check. |
-| **Two agents can't see each other** | They're in different rooms. Both need the same `INTERMIND_DB`. Default is relative to cwd, so cwd has to match. |
+| **Two agents can't see each other** | They're in different rooms. The default room is `~/.intermind/state.db` (shared across the whole machine), so this usually means one of them has `INTERMIND_DB` set to something else. Check the `hint` field on `register_agent`'s response — when you're alone, it tells you which file you opened. |
 | **`wait_for_reply` always times out** | Your peer replied without `thread_id` (so it started a new thread), or they aren't actually working. Fall back to `inbox`. |
 
 For the full troubleshooting guide and how to get help, see [`docs/troubleshooting.md`](./docs/guides/troubleshooting.md).
@@ -549,9 +545,9 @@ The trust boundary is `server.ts`: it validates every input with the Zod shapes 
 
 ```bash
 bun install         # install deps
-bun test            # 37 tests, ~5s, all in-memory
+bun test            # 42 tests, ~5s, all in-memory
 bun run typecheck   # tsc --noEmit
-bun run start       # run the stdio server (default DB at ./.intermind/state.db)
+bun run start       # run the stdio server (default DB at ~/.intermind/state.db)
 ```
 
 There are two test files:
@@ -602,7 +598,7 @@ If you want any of those, see [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`ROADM
 <summary><b>Does this work over the network?</b></summary>
 <br>
 
-No. 0.0.1 is stdio-only and assumes local trust (same machine, same user). Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
+No. 0.1.0 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` is one file per machine, so it covers "two agents on my laptop" but stops there. Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
 
 </details>
 
@@ -626,7 +622,7 @@ SQLite WAL mode allows concurrent reads and serialises writes. The message volum
 <summary><b>Where does state go when I'm done?</b></summary>
 <br>
 
-Wherever `INTERMIND_DB` points (default `./.intermind/state.db`). Delete the file to wipe the room. We already gitignore `.intermind`.
+Wherever `INTERMIND_DB` points (default `~/.intermind/state.db`). Delete the file to wipe the room. The default lives in your home directory; if you set a project-local `INTERMIND_DB=./.intermind/...`, the repo's `.gitignore` already excludes `.intermind/`.
 
 </details>
 
@@ -634,7 +630,7 @@ Wherever `INTERMIND_DB` points (default `./.intermind/state.db`). Delete the fil
 <summary><b>Can I run more than one room?</b></summary>
 <br>
 
-Yes — start each agent with a different `INTERMIND_DB`. Different file, different room.
+Yes — start each agent with a different `INTERMIND_DB`. Different file, different room. The default (no env var set) is `~/.intermind/state.db`, the global room.
 
 </details>
 
@@ -642,7 +638,7 @@ Yes — start each agent with a different `INTERMIND_DB`. Different file, differ
 <summary><b>Can I run agents on different machines?</b></summary>
 <br>
 
-Not today. Cross-machine support is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule. For now, run all agents on the same machine, same project directory.
+Not today. The default `~/.intermind/state.db` covers everything on one laptop; once you cross machines, you'd need a shared filesystem (and that's not a path we support yet). Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
 
 </details>
 

@@ -84,6 +84,18 @@ export interface RegisterAgentResult {
   token: string;
   display_name: string;
   role: string;
+  /**
+   * Number of *other* agents in this room at registration time. 0 means
+   * the caller is alone — useful so the server layer can decide whether
+   * to attach an "are you sure you wired up the same DB?" hint.
+   */
+  room_size: number;
+  /**
+   * Optional onboarding hint (e.g. "you're alone in this room — set
+   * INTERMIND_DB to share with another project"). Set by the server
+   * layer because the handler doesn't know the configured db path.
+   */
+  hint?: string;
 }
 
 export interface AuthedArgs {
@@ -168,11 +180,20 @@ function register_agent(
     [id, args.display_name, args.role, token, now, now],
   );
 
+  // Count peers (everybody except us) so the caller can tell whether
+  // they just walked into an empty room. Two Claude Code sessions in
+  // different project dirs both registering and seeing room_size: 0 is
+  // the canonical "you forgot to share INTERMIND_DB" symptom.
+  const peers = db
+    .query("SELECT COUNT(*) AS n FROM agents WHERE id != ?")
+    .get(id) as { n: number };
+
   return {
     agent_id: id,
     token,
     display_name: args.display_name,
     role: args.role,
+    room_size: peers.n,
   };
 }
 

@@ -14,8 +14,8 @@ These are decided. Don't relitigate without a strong reason; if you do, update t
 | ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Language / runtime | **Bun** (TypeScript runtime, package manager, bundler, test runner, built-in SQLite — all in one)                 | One tool, no extra build chain. Bun runs TS directly via `bun run`; `bun test` is the test runner; `bun:sqlite` is the database.                              |
 | MCP SDK            | `@modelcontextprotocol/sdk` v1.x (the production line; v2 is pre-alpha)                                           | Canonical TypeScript implementation.                                                                                                                          |
-| Transports         | stdio in v1; Streamable HTTP later if needed                                                                      | Per-project SQLite + WAL means each MCP client can spawn its own stdio subprocess and they all share `.intermind/state.db`. No HTTP needed for v1.            |
-| Persistence        | SQLite (WAL mode), single file at `./.intermind/state.db`                                                         | WAL allows multiple processes to read/write concurrently — every MCP-client-spawned Intermind subprocess opens the same file. Zero coordination, zero daemon. |
+| Transports         | stdio in v1; Streamable HTTP later if needed                                                                      | Global default DB + WAL means each MCP-client-spawned subprocess on the same machine shares `~/.intermind/state.db`. No HTTP needed for v1 within one machine. |
+| Persistence        | SQLite (WAL mode), single file at `~/.intermind/state.db` (global default); per-project rooms via `INTERMIND_DB`. | Two coding-agent sessions in different repos is the **common** case (BE in `~/projects/api`, FE in `~/projects/web`). Defaulting to a per-project file silently routed them into separate rooms. Global default is the principle of least surprise; per-project is now an explicit opt-in. |
 | Coordination model | Threaded mailbox, mediated through the server                                                                     | Clients can't peer-to-peer. Sampling/elicitation are *not* substitutes for inter-client messaging.                                                            |
 | Identity           | Self-declared `display_name` + `role` at `register_agent`; bearer token returned and required on subsequent calls | Simple, works for both transports.                                                                                                                            |
 | Concurrency        | SQLite WAL mode (read concurrency, single writer)                                                                 | Adequate for v1 message volume.                                                                                                                               |
@@ -27,8 +27,8 @@ These are decided. Don't relitigate without a strong reason; if you do, update t
 ## Resolved questions (kept here for the record)
 
 1. **Polling vs. push for `inbox`.** ✅ **Long-poll on both transports.** `wait_for_reply` runs a SQL select in a 200 ms loop with a deadline. One code path. Sub-second push isn't worth a forked implementation since agents already think for tens of seconds per turn.
-2. **Single-project vs. multi-project server.** ✅ **Per-project.** SQLite WAL mode lets every MCP-client-spawned Intermind subprocess open the same `./.intermind/state.db` safely. The database *is* the meeting point — no daemon, no socket, no coordination protocol.
-3. **Observer CLI.** ✅ **Don't ship one in v1.** A one-liner — `sqlite3 .intermind/state.db "SELECT created_at, from_agent, body FROM messages ORDER BY created_at DESC LIMIT 20"` — gets you 90% of the value. Add a CLI in v2 only if the one-liner stops being enough.
+2. **Where does the room live by default?** ✅ **Globally, at `~/.intermind/state.db`.** Originally per-project (`./.intermind/state.db`), flipped in 0.1.0 after the obvious failure mode showed up: BE agent in `~/projects/api` and FE agent in `~/projects/web` both started, both saw an empty `list_agents`, and never met. Two agents in two repos is the common case, not the exception. SQLite WAL still does the heavy lifting; only the default path moved. Per-project rooms are still supported via `INTERMIND_DB=./.intermind/state.db` when a team genuinely wants project isolation.
+3. **Observer CLI.** ✅ **Don't ship one in v1.** A one-liner — `sqlite3 ~/.intermind/state.db "SELECT created_at, from_agent, body FROM messages ORDER BY created_at DESC LIMIT 20"` — gets you 90% of the value. Add a CLI in v2 only if the one-liner stops being enough.
 
 ## Repo layout (actual)
 
@@ -66,7 +66,7 @@ Tooling: just **Bun** plus `zod` for schema validation at the MCP boundary. No p
 
 ```bash
 bun install              # installs the MCP SDK + zod
-bun run start            # runs src/index.ts (stdio; default DB at ./.intermind/state.db)
+bun run start            # runs src/index.ts (stdio; default DB at ~/.intermind/state.db)
 bun test                 # runs the test suite against an in-memory SQLite
 bun run typecheck        # tsc --noEmit
 ```

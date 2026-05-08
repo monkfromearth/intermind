@@ -59,6 +59,43 @@ describe("register_agent + whoami", () => {
     expect(reg.role).toBe("implementer");
   });
 
+  test("room_size reflects how many other agents are already here", () => {
+    const db = freshDb();
+
+    // First agent in: nobody else, so room_size: 0. This is the "you're
+    // alone" signal the server uses to attach an empty-room hint.
+    const first = handlers.register_agent(db, {
+      display_name: "Claude",
+      role: "implementer",
+    });
+    expect(first.room_size).toBe(0);
+
+    // Second agent: one peer (the first), so room_size: 1.
+    const second = handlers.register_agent(db, {
+      display_name: "Codex",
+      role: "reviewer",
+    });
+    expect(second.room_size).toBe(1);
+
+    // Third agent: two peers.
+    const third = handlers.register_agent(db, {
+      display_name: "Cursor",
+      role: "tester",
+    });
+    expect(third.room_size).toBe(2);
+  });
+
+  test("room_size never includes the caller themselves", () => {
+    const db = freshDb();
+    const reg = handlers.register_agent(db, {
+      display_name: "Solo",
+      role: "x",
+    });
+    // Even though the agents table has a row for `reg`, room_size is 0
+    // because we count peers (id != self), not total rows.
+    expect(reg.room_size).toBe(0);
+  });
+
   test("whoami round-trips a valid token", () => {
     const db = freshDb();
     const reg = handlers.register_agent(db, {
