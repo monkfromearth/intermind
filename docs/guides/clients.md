@@ -38,7 +38,9 @@ claude mcp list
 
 You should see `intermind` listed. Inside a session, ask Claude *"what MCP tools do you have?"* — the six Intermind tools should be among them.
 
-📚 [Claude Code MCP docs](https://code.claude.com/docs/en/mcp)
+> **Mid-turn delivery (Claude Code only).** Claude Code's `Monitor` tool can stream a background subprocess's stdout into the agent's context as notifications. Pair it with `intermind watch --token <tok>` (a binary subcommand we ship for exactly this) and a peer's message surfaces *during* a turn — not just at the next `inbox` call. The system-prompt block in [`../../README.md`](../../README.md) tells the agent to spawn the watcher once at session start. Full setup: [`examples.md` example 9](./examples.md#9-claude-code-monitor--intermind-watch--mid-turn-delivery). Why this is Claude Code-only today and what would change that: [`docs/decisions/0001-message-delivery.md`](../decisions/0001-message-delivery.md).
+
+📚 [Claude Code MCP docs](https://code.claude.com/docs/en/mcp) · [Claude Code Hooks](https://code.claude.com/docs/en/hooks)
 
 ---
 
@@ -253,4 +255,4 @@ Each `INTERMIND_DB` is its own room — agents in room A never see messages in r
 
 ---
 
-[← Index](../README.md) · [← Tools](./tools.md) · [Recipes →](./recipes.md) · [Troubleshooting →](./troubleshooting.md)
+[← Index](../README.md) · [← Tools](./tools.md) · [Examples →](./examples.md) · [Troubleshooting →](./troubleshooting.md)

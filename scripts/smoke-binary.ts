@@ -3,10 +3,10 @@
  *
  * Spawns two `bin/intermind` subprocesses pointing at the same SQLite
  * file, then runs a complete FE <-> BE conversation through the SDK:
- *   - both register, both list_agents
+ *   - both join, both list peers
  *   - FE sends a message
- *   - BE receives via wait_for_reply, replies on the same thread
- *   - FE receives the reply via wait_for_reply
+ *   - BE receives via listen, replies on the same thread
+ *   - FE receives the reply via listen
  *
  * This is the closest thing to "two Claude Code instances talking" we
  * can run without spinning up real LLM clients.
@@ -25,7 +25,7 @@ const DB_PATH = join(ROOM_DIR, "state.db");
 // Wraps client.callTool and parses the JSON envelope MCP returns.
 // MCP wraps every tool result in `{ content: [{ type: "text", text: "<json>" }] }`,
 // so the actual handler return value is the parsed `text` of the first content block.
-// Example: register_agent returns {agent_id, token} but over MCP arrives as
+// Example: `join` returns {agent_id, token} but over MCP arrives as
 //   { content: [{ type: "text", text: '{"agent_id":"...","token":"..."}' }] }.
 async function call<T>(client: Client, name: string, args: Record<string, unknown>): Promise<T> {
   const res = (await client.callTool({ name, arguments: args })) as {
@@ -69,39 +69,42 @@ async function main(): Promise<void> {
   const be = await spawnAgent("be");
   console.log("[smoke] both clients connected");
 
-  // Step 1 - both agents register. Each returns a fresh agent_id + bearer
+  // Step 1 - both agents join. Each returns a fresh agent_id + bearer
   // token that must be passed on every subsequent call.
   const feReg = await call<{ agent_id: string; token: string }>(
     fe.client,
-    "register_agent",
+    "join",
     { display_name: "FE", role: "frontend" },
   );
   const beReg = await call<{ agent_id: string; token: string }>(
     be.client,
-    "register_agent",
+    "join",
     { display_name: "BE", role: "backend" },
   );
-  console.log(`[smoke] FE registered: ${feReg.agent_id}`);
-  console.log(`[smoke] BE registered: ${beReg.agent_id}`);
+  console.log(`[smoke] FE joined: ${feReg.agent_id}`);
+  console.log(`[smoke] BE joined: ${beReg.agent_id}`);
 
-  // Step 2 - FE lists agents. Should see both itself and BE through the
-  // shared SQLite file (WAL lets the second subprocess read writes from
-  // the first immediately).
-  const fePeers = await call<{ agents: Array<{ id: string; display_name: string; role: string }> }>(
+  // Step 2 - FE lists peers. Should see only BE (peers excludes the
+  // caller) through the shared SQLite file (WAL lets the second
+  // subprocess read writes from the first immediately).
+  const fePeers = await call<{ room: string; agents: Array<{ id: string; display_name: string; role: string }> }>(
     fe.client,
-    "list_agents",
+    "peers",
     { token: feReg.token },
   );
-  if (fePeers.agents.length !== 2) {
-    throw new Error(`expected 2 agents, got ${fePeers.agents.length}`);
+  if (fePeers.agents.length !== 1) {
+    throw new Error(`expected 1 peer (BE), got ${fePeers.agents.length}`);
   }
-  console.log(`[smoke] FE sees: ${fePeers.agents.map((a) => `${a.display_name}(${a.role})`).join(", ")}`);
+  if (fePeers.room !== "main") {
+    throw new Error(`expected default room 'main', got '${fePeers.room}'`);
+  }
+  console.log(`[smoke] FE in room '${fePeers.room}', sees peer: ${fePeers.agents.map((a) => `${a.display_name}(${a.role})`).join(", ")}`);
 
   // Step 3 - FE sends an opening message. No thread_id given, so the
   // server creates one and returns it; we'll reuse it for the BE reply.
   const feSend = await call<{ thread_id: string; message_ids: string[]; delivered: string[] }>(
     fe.client,
-    "send_message",
+    "send",
     {
       token: feReg.token,
       to: beReg.agent_id,
@@ -114,7 +117,7 @@ async function main(): Promise<void> {
   // the row is already in the DB before this call returns from FE's send.
   const beReceived = await call<{ message: { id: string; thread_id: string; from_agent: string; body: string } | null; timeout: boolean }>(
     be.client,
-    "wait_for_reply",
+    "listen",
     { token: beReg.token, thread_id: feSend.thread_id, timeout_sec: 5 },
   );
   if (!beReceived.message) throw new Error("BE timed out waiting for FE message");
@@ -127,7 +130,7 @@ async function main(): Promise<void> {
   // catches a class of bug where the server silently starts a new thread.
   const beReply = await call<{ thread_id: string; delivered: string[] }>(
     be.client,
-    "send_message",
+    "send",
     {
       token: beReg.token,
       to: feReg.agent_id,
@@ -140,10 +143,10 @@ async function main(): Promise<void> {
   }
   console.log(`[smoke] BE replied on same thread`);
 
-  // Step 6 - FE picks up BE's reply via wait_for_reply.
+  // Step 6 - FE picks up BE's reply via listen.
   const feReceived = await call<{ message: { id: string; thread_id: string; from_agent: string; body: string } | null; timeout: boolean }>(
     fe.client,
-    "wait_for_reply",
+    "listen",
     { token: feReg.token, thread_id: feSend.thread_id, timeout_sec: 5 },
   );
   if (!feReceived.message) throw new Error("FE timed out waiting for BE reply");
@@ -152,7 +155,7 @@ async function main(): Promise<void> {
   }
   console.log(`[smoke] FE received reply: "${feReceived.message.body.slice(0, 60)}..."`);
 
-  // Step 7 - both inboxes empty (wait_for_reply marks-read on consume,
+  // Step 7 - both inboxes empty (`listen` marks-read on consume,
   // so a follow-up inbox() with default mark_read=true should drain to 0).
   const feInbox = await call<{ messages: unknown[]; count: number }>(
     fe.client,

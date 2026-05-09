@@ -37,11 +37,11 @@ If both clients are configured to talk to the **same** MCP server, that server c
                                                   MCP client
 ```
 
-Each client uses standard MCP tool calls (`send_message`, `inbox`, `wait_for_reply`, …). Intermind:
+Each client uses standard MCP tool calls (`send`, `inbox`, `listen`, …). Intermind:
 
-- Identifies who's connected (`register_agent`).
+- Identifies who's in the room (`join`).
 - Stores messages and threads in SQLite.
-- Hands messages back to the recipient when they call `inbox` or `wait_for_reply`.
+- Hands messages back to the recipient when they call `inbox` or `listen`.
 
 That's it. No new protocol on the wire — just standard MCP tool calls, but the *meaning* of those tool calls is "talk to my peers." Whatever the agents discuss inside those messages — diffs, tasks, plans — is their own concern; Intermind only moves bytes.
 

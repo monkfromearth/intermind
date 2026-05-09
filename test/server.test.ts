@@ -7,7 +7,7 @@
  * thing to "what Claude Code actually sees" without launching an MCP
  * client subprocess.
  *
- * Anything tested here that the per-handler tests in `intermind.test.ts`
+ * Anything tested here that the per-handler tests in `handlers.test.ts`
  * do NOT cover lives at the MCP boundary: tool discovery, JSON envelope
  * shape, `isError` propagation, and zod-level input validation that
  * the SDK enforces before our handlers ever run.
@@ -121,14 +121,7 @@ describe("MCP tool discovery", () => {
     const names = tools.tools.map((t) => t.name).toSorted();
 
     expect(names).toEqual(
-      [
-        "register_agent",
-        "whoami",
-        "list_agents",
-        "send_message",
-        "inbox",
-        "wait_for_reply",
-      ].toSorted(),
+      ["join", "whoami", "peers", "send", "inbox", "listen"].toSorted(),
     );
   });
 
@@ -158,12 +151,12 @@ describe("end-to-end conversation", () => {
 
     const alice = await call<{ agent_id: string; token: string }>(
       client,
-      "register_agent",
+      "join",
       { display_name: "Alice", role: "implementer" },
     );
     const bob = await call<{ agent_id: string; token: string }>(
       client,
-      "register_agent",
+      "join",
       { display_name: "Bob", role: "reviewer" },
     );
 
@@ -171,7 +164,7 @@ describe("end-to-end conversation", () => {
       thread_id: string;
       delivered: string[];
       message_ids: string[];
-    }>(client, "send_message", {
+    }>(client, "send", {
       token: alice.token,
       to: bob.agent_id,
       body: "please review",
@@ -190,35 +183,35 @@ describe("end-to-end conversation", () => {
     expect(inbox.messages[0]!.thread_id).toBe(sent.thread_id);
   });
 
-  test("list_agents over MCP returns every registered agent", async () => {
+  test("peers over MCP returns the other agents in the caller's room", async () => {
     const { client } = harness;
-    const a = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "Ann", role: "x" },
-    );
-    const b = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "Bea", role: "y" },
-    );
+    const a = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "Ann",
+      role: "x",
+    });
+    const b = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "Bea",
+      role: "y",
+    });
 
-    const list = await call<{ agents: Array<{ id: string }> }>(
+    // peers excludes the caller, so Ann asking should see only Bea.
+    // The room field echoes back the room — handy for the LLM to
+    // confirm-and-announce in one step.
+    const list = await call<{ room: string; agents: Array<{ id: string }> }>(
       client,
-      "list_agents",
+      "peers",
       { token: a.token },
     );
-    const ids = list.agents.map((x) => x.id).toSorted();
-    expect(ids).toEqual([a.agent_id, b.agent_id].toSorted());
+    expect(list.room).toBe("main");
+    expect(list.agents.map((x) => x.id)).toEqual([b.agent_id]);
   });
 
   test("whoami over MCP round-trips the caller's identity", async () => {
     const { client } = harness;
-    const a = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "Ann", role: "x" },
-    );
+    const a = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "Ann",
+      role: "x",
+    });
 
     const me = await call<{ agent_id: string; display_name: string }>(
       client,
@@ -237,23 +230,20 @@ describe("end-to-end conversation", () => {
 describe("broadcast end-to-end", () => {
   test("'*' fans out to every other agent's inbox", async () => {
     const { client } = harness;
-    const a = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "A", role: "x" },
-    );
-    const b = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "B", role: "x" },
-    );
-    const c = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "C", role: "x" },
-    );
+    const a = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "A",
+      role: "x",
+    });
+    const b = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "B",
+      role: "x",
+    });
+    const c = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "C",
+      role: "x",
+    });
 
-    const sent = await call<{ delivered: string[] }>(client, "send_message", {
+    const sent = await call<{ delivered: string[] }>(client, "send", {
       token: a.token,
       to: "*",
       body: "hello room",
@@ -271,32 +261,30 @@ describe("broadcast end-to-end", () => {
 /* long-poll over the wire                                             */
 /* ------------------------------------------------------------------ */
 
-describe("wait_for_reply end-to-end", () => {
+describe("listen end-to-end", () => {
   test("blocks until a message arrives on the thread", async () => {
     const { client } = harness;
-    const a = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "A", role: "x" },
-    );
-    const b = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "B", role: "x" },
-    );
+    const a = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "A",
+      role: "x",
+    });
+    const b = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "B",
+      role: "x",
+    });
 
-    // wait_for_reply does NOT take poll_ms over MCP, so this exercises
-    // the production 200ms poll. We start the wait, then send 250ms
-    // later, and assert the wait resolved with the message.
+    // listen does NOT take poll_ms over MCP, so this exercises the
+    // production 200ms poll. We start the wait, then send 250ms later,
+    // and assert the wait resolved with the message.
     const thread_id = `thr_${crypto.randomUUID()}`;
     const waiter = call<{ message: { body: string } | null; timeout: boolean }>(
       client,
-      "wait_for_reply",
+      "listen",
       { token: b.token, thread_id, timeout_sec: 5 },
     );
 
     setTimeout(() => {
-      void call(client, "send_message", {
+      void call(client, "send", {
         token: a.token,
         to: b.agent_id,
         thread_id,
@@ -311,15 +299,14 @@ describe("wait_for_reply end-to-end", () => {
 
   test("times out cleanly when no message arrives", async () => {
     const { client } = harness;
-    const b = await call<{ token: string; agent_id: string }>(
-      client,
-      "register_agent",
-      { display_name: "B", role: "x" },
-    );
+    const b = await call<{ token: string; agent_id: string }>(client, "join", {
+      display_name: "B",
+      role: "x",
+    });
 
     const out = await call<{ message: null; timeout: boolean }>(
       client,
-      "wait_for_reply",
+      "listen",
       { token: b.token, thread_id: "thr_empty", timeout_sec: 1 },
     );
     expect(out.timeout).toBe(true);
@@ -331,25 +318,30 @@ describe("wait_for_reply end-to-end", () => {
 /* empty-room hint                                                     */
 /* ------------------------------------------------------------------ */
 
-describe("empty-room hint on register_agent", () => {
-  test("first agent gets a hint with the dbPath when one is configured", async () => {
+describe("empty-room hint on join", () => {
+  test("first agent gets a hint with the room name and dbPath", async () => {
     // Custom harness so we can pass an explicit dbPath. The hint embeds
-    // this path so a freshly registered agent can see exactly which file
-    // a peer would need to share.
+    // both the room name (so the LLM can tell the user what to relay)
+    // and the dbPath (so the user knows which file a peer would share).
     const local = await makeHarness({ dbPath: "/tmp/test-intermind.db" });
     try {
       const reg = await call<{
+        room: string;
         room_size: number;
         hint?: string;
-      }>(local.client, "register_agent", {
+      }>(local.client, "join", {
         display_name: "Solo",
         role: "x",
+        room: "feature-auth",
       });
 
-      // Alone in the room → room_size: 0 and hint mentions the dbPath
-      // plus the INTERMIND_DB env var so the user knows the lever.
+      // Alone in the room → room_size: 0 and the hint must include the
+      // room name (so the LLM can repeat it back to the user) plus the
+      // INTERMIND_DB lever for the cross-machine case.
+      expect(reg.room).toBe("feature-auth");
       expect(reg.room_size).toBe(0);
       expect(reg.hint).toBeDefined();
+      expect(reg.hint).toContain("feature-auth");
       expect(reg.hint).toContain("/tmp/test-intermind.db");
       expect(reg.hint).toContain("INTERMIND_DB");
     } finally {
@@ -357,16 +349,16 @@ describe("empty-room hint on register_agent", () => {
     }
   });
 
-  test("second agent gets no hint because the room isn't empty", async () => {
+  test("second agent in the same room gets no hint", async () => {
     const local = await makeHarness({ dbPath: "/tmp/test-intermind.db" });
     try {
-      await call(local.client, "register_agent", {
+      await call(local.client, "join", {
         display_name: "First",
         role: "x",
       });
       const second = await call<{ room_size: number; hint?: string }>(
         local.client,
-        "register_agent",
+        "join",
         { display_name: "Second", role: "x" },
       );
 
@@ -377,16 +369,18 @@ describe("empty-room hint on register_agent", () => {
     }
   });
 
-  test("no hint when buildServer is called without a dbPath", async () => {
-    // Default harness — no dbPath passed. Even alone, no hint, because
-    // we'd have nothing useful to put in the message.
-    const reg = await call<{ room_size: number; hint?: string }>(
+  test("hint without a configured dbPath omits the path but keeps the room name", async () => {
+    // Default harness — no dbPath passed. Hint should still mention the
+    // room name (the actionable part: "tell your peer to use this room")
+    // even when the path is unknown.
+    const reg = await call<{ room: string; room_size: number; hint?: string }>(
       harness.client,
-      "register_agent",
-      { display_name: "Solo", role: "x" },
+      "join",
+      { display_name: "Solo", role: "x", room: "alpha" },
     );
     expect(reg.room_size).toBe(0);
-    expect(reg.hint).toBeUndefined();
+    expect(reg.hint).toBeDefined();
+    expect(reg.hint).toContain("alpha");
   });
 });
 
@@ -404,13 +398,13 @@ describe("error envelope at the MCP boundary", () => {
     expect(text).toContain("invalid session token");
   });
 
-  test("an unknown recipient on send_message surfaces as isError", async () => {
+  test("an unknown recipient on send surfaces as isError", async () => {
     const a = await call<{ token: string; agent_id: string }>(
       harness.client,
-      "register_agent",
+      "join",
       { display_name: "A", role: "x" },
     );
-    const result = await callRaw(harness.client, "send_message", {
+    const result = await callRaw(harness.client, "send", {
       token: a.token,
       to: "agt_nope",
       body: "x",
@@ -423,12 +417,12 @@ describe("error envelope at the MCP boundary", () => {
   test("zod rejects an empty message body before the handler runs", async () => {
     const a = await call<{ token: string; agent_id: string }>(
       harness.client,
-      "register_agent",
+      "join",
       { display_name: "A", role: "x" },
     );
     const b = await call<{ token: string; agent_id: string }>(
       harness.client,
-      "register_agent",
+      "join",
       { display_name: "B", role: "x" },
     );
 
@@ -438,7 +432,7 @@ describe("error envelope at the MCP boundary", () => {
     // no message was created in the recipient's inbox.
     await expectRejection(
       harness.client.callTool({
-        name: "send_message",
+        name: "send",
         arguments: { token: a.token, to: b.agent_id, body: "" },
       }),
       /body|invalid|validation|string|empty/i,
@@ -450,10 +444,10 @@ describe("error envelope at the MCP boundary", () => {
     expect(inbox.count).toBe(0);
   });
 
-  test("zod rejects a missing required field on register_agent", async () => {
+  test("zod rejects a missing required field on join", async () => {
     await expectRejection(
       harness.client.callTool({
-        name: "register_agent",
+        name: "join",
         // Intentionally missing `role` — exercises Zod validation path.
         arguments: { display_name: "A" } as Record<string, unknown>,
       }),

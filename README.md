@@ -5,6 +5,8 @@
   </picture>
 </p>
 
+<p align="center"><sub>by <a href="https://monkfrom.earth"><strong>monkfromearth</strong></a></sub></p>
+
 <p align="center"><strong>Pair programming for AI coding agents.</strong></p>
 
 <p align="center">
@@ -23,7 +25,7 @@
   <a href="#wire-it-into-your-coding-agent">Wire-up</a> ·
   <a href="#your-first-conversation">First conversation</a> ·
   <a href="./docs/guides/tools.md">Tool reference</a> ·
-  <a href="./docs/guides/recipes.md">Recipes</a> ·
+  <a href="./docs/guides/examples.md">Examples</a> ·
   <a href="./docs/guides/troubleshooting.md">Troubleshooting</a>
 </p>
 
@@ -39,14 +41,14 @@ That's Intermind. It does *one* thing — move messages between agents — and g
 
 ## What you get
 
-- 💬 **Direct messages and broadcasts** between any registered agents
+- 💬 **Direct messages and broadcasts** between any agent in your room
 - 🧵 **Threaded conversations** so a back-and-forth review stays grouped
 - 📥 **Inbox** for catching up on pending messages
 - ⏳ **Long-poll wait** so an agent can block until its peer replies
-- 💾 **Shared SQLite file** at `~/.intermind/state.db` — no daemon, no socket, no extra services
+- 🚪 **Rooms** so two pairs working on different features stay isolated — agents pick the room from the current git branch automatically
 - 🔒 **Bearer-token auth** so agents can't impersonate each other
 
-Six tools, a thread model, an SQLite file. That's the whole product.
+Six tools, a thread model, rooms. That's the whole product.
 
 ## Architecture in one picture
 
@@ -64,24 +66,42 @@ Six tools, a thread model, an SQLite file. That's the whole product.
                 │                             │
                 └──────────────┬──────────────┘
                                ▼
-                  ┌────────────────────────┐
-                  │   ~/.intermind/state.db│
-                  │   (SQLite, WAL mode)   │
-                  └────────────────────────┘
+                    ┌────────────────────┐
+                    │  Room "feature-x"  │
+                    │  Room "feature-y"  │
+                    │  Room "main"       │
+                    └────────────────────┘
 ```
 
-Each MCP client (Claude Code, Codex, …) launches its **own** Intermind subprocess over stdio. By default, every subprocess on this machine opens the **same** SQLite file at `~/.intermind/state.db`, so a Claude Code session in `~/projects/api` and a Codex session in `~/projects/web` land in the same room without any extra config. SQLite's [WAL mode](https://www.sqlite.org/wal.html) handles cross-process concurrency, so there's no daemon, no socket, and no inter-process protocol to maintain. Want a per-project room instead? Set `INTERMIND_DB` to a project-local path.
+Each MCP client (Claude Code, Codex, …) launches its **own** Intermind subprocess over stdio. Every subprocess on this machine connects to the same Intermind state, so a Claude Code session in `~/projects/api` and a Codex session in `~/projects/web` can find each other without any extra config. They land in the **same room** when they pass the same `room` name to `join` — and the agent picks the room from your current git branch by default, so per-feature pairs stay isolated automatically.
 
 ## Quick start
 
-One command per agent. No install step.
+One-click install for the supported clients:
+
+<p>
+  <a href="cursor://anysphere.cursor-deeplink/mcp/install?name=intermind&config=eyJjb21tYW5kIjoiYnVueCIsImFyZ3MiOlsiLXkiLCJpbnRlcm1pbmQiXX0=">
+    <img alt="Add to Cursor" src="https://img.shields.io/badge/Add%20to-Cursor-000000?style=for-the-badge&logo=cursor&logoColor=white">
+  </a>
+  &nbsp;
+  <a href="vscode:mcp/install?%7B%22name%22%3A%22intermind%22%2C%22command%22%3A%22bunx%22%2C%22args%22%3A%5B%22-y%22%2C%22intermind%22%5D%7D">
+    <img alt="Install in VS Code" src="https://img.shields.io/badge/Install%20in-VS%20Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white">
+  </a>
+  &nbsp;
+  <a href="vscode-insiders:mcp/install?%7B%22name%22%3A%22intermind%22%2C%22command%22%3A%22bunx%22%2C%22args%22%3A%5B%22-y%22%2C%22intermind%22%5D%7D">
+    <img alt="Install in VS Code Insiders" src="https://img.shields.io/badge/Install%20in-VS%20Code%20Insiders-1D9D74?style=for-the-badge&logo=visualstudiocode&logoColor=white">
+  </a>
+</p>
+
+Or one command for Claude Code:
 
 ```bash
-# Claude Code (project-scoped — commits .mcp.json so teammates pick it up)
 claude mcp add --scope project intermind -- bunx -y intermind
 ```
 
-Restart Claude Code, ask it *"list your MCP tools"*, you should see the six Intermind tools. Run the same wire-up in your second agent — anywhere on the same machine. They share `~/.intermind/state.db` by default, so a Claude Code session in `~/projects/api` and a Codex session in `~/projects/web` are already in the same room. See [Wire-up](#wire-it-into-your-coding-agent) for Codex / Cursor / Windsurf / VS Code / Zed / Cline / Continue.
+Restart your agent, ask it *"list your MCP tools"* — you should see the six Intermind tools. Run the same wire-up in any second agent on the same machine and they meet automatically: each picks the room from the current git branch, and agents on the same branch land in the same room.
+
+For every other client (Codex, Cline, Windsurf, Zed, Continue, Claude Desktop) the snippet is one block away — see [Wire-up](#wire-it-into-your-coding-agent).
 
 You need [Bun](https://bun.com) ≥ 1.1.0 so `bunx` exists. One-liner: `curl -fsSL https://bun.com/install | bash`. Bun handles the rest — `bunx -y intermind` fetches the package on first use, caches it, runs it.
 
@@ -148,15 +168,19 @@ In every wire-up snippet, replace `"command": "bunx", "args": ["-y", "intermind"
 
 The shape is the same for every client: launch `bunx -y intermind` over stdio. Pick yours below.
 
-> **Same room by default.** Two agents share a room when they open the same SQLite file. The default is `~/.intermind/state.db` — a single file per machine — so any two agents running on the same laptop are in the same room out of the box, regardless of which project directory they were launched from. Want isolated rooms (one per repo, one per user, etc.)? Set `INTERMIND_DB` to whatever path the peers should share, the same on each one.
+> **Rooms control who sees whom.** Each agent passes a `room` name to `join`. Two agents see each other only when they're in the same room. By default the agent reads your current git branch (`git branch --show-current`) and uses it as the room — so a backend pair on `feature-auth` and a frontend pair on `feature-billing` automatically split into separate rooms with zero config. Outside a git repo, the default is `"main"`.
 
 ### Claude Code
 
-```bash
-# Project-scoped (commits .mcp.json so the whole team picks it up)
-claude mcp add --scope project intermind -- bunx -y intermind
+Project-scoped (commits `.mcp.json` so the whole team picks it up):
 
-# Or user-scoped (just you, every project)
+```bash
+claude mcp add --scope project intermind -- bunx -y intermind
+```
+
+Or user-scoped (just you, every project):
+
+```bash
 claude mcp add --scope user intermind -- bunx -y intermind
 ```
 
@@ -347,67 +371,170 @@ For per-client notes (verify steps, restart behaviour, gotchas), see [`docs/guid
 
 ### Verify it's wired up
 
-After restarting your coding agent, ask it: *"List the MCP tools you have access to."* You should see `register_agent`, `whoami`, `list_agents`, `send_message`, `inbox`, `wait_for_reply`. If those show up, you're done.
+After restarting your coding agent, ask it: *"List the MCP tools you have access to."* You should see `join`, `whoami`, `peers`, `send`, `inbox`, `listen`. If those show up, you're done.
 
 ## Your first conversation
 
-The whole point of the global default room is that two coding agents in **two different repos** can already see each other. Here's the canonical setup: one agent on the API repo, one on the web app repo.
+A backend agent in one repo, a frontend agent in another, both on the same feature branch. They join the same room automatically and start talking.
 
-**Step 1 — In `~/projects/api`**, you have a Claude Code session running on the backend. Tell it:
+**Step 1 — In `~/projects/api`** (a Claude Code session on `feature-checkout`):
 
 > *"Hop on Intermind as the backend dev — see who else is around."*
 
-It registers, lists agents, and reports back. First time through, it's alone in the room.
+The agent runs `git branch --show-current`, reads `feature-checkout`, calls `join({ room: "feature-checkout", role: "backend" })`, then `peers`. It reports back: *"I'm in Intermind room 'feature-checkout'. I'm the only one here so far."*
 
-**Step 2 — In `~/projects/web`**, you have a separate Codex session running on the frontend. Tell it:
+**Step 2 — In `~/projects/web`** (a Codex session on the same branch, `feature-checkout`):
 
-> *"Jump on Intermind as the frontend dev and say hi to the backend."*
+> *"Hop on Intermind as the frontend and say hi to the backend."*
 
-Same machine, different project, different terminal — but **same room** (`~/.intermind/state.db` is shared by default). Codex registers, finds the backend in `list_agents`, and sends a hello.
+Same trick — Codex reads its branch, joins `feature-checkout`, calls `peers`, finds the backend agent, fires a `send` introducing itself.
 
-**Step 3 — Back in the backend session** (`~/projects/api`):
+**Step 3 — Back in the backend session:**
 
-> *"Anything new on Intermind? If the frontend pinged, say hi back and ask what they're working on."*
+> *"Anything new on Intermind?"*
 
-Claude Code checks its inbox, finds Codex's message, and replies on the same thread.
+Claude Code calls `inbox`, finds the frontend's hello, replies on the same `thread_id`. From here on, they're a pair — one room, one thread, two agents passing diffs and review comments back and forth without you babysitting either side.
 
-**Step 4 — Back in the frontend session** (`~/projects/web`):
+**What the agent does for you on `join`:**
 
-> *"What did the backend say?"*
+| You don't pass | Agent picks |
+| --- | --- |
+| `room` | The current git branch (`git branch --show-current`). Outside a git repo, `"main"`. |
+| Anything else | Nothing — the agent prompts you for `display_name` and `role` if it doesn't already know them. |
 
-That's it. Two repos, two coding agents, zero config — they found each other through the global default room. Swap the roles for whatever you actually have running (a reviewer in one repo, an implementer in another; a tester sharing test plans with the dev that wrote the code).
+The agent tells you the room name in plain words right after joining (rule 3 of the [system prompt](./docs/agent-system-prompt.md)). That's your cue to tell the other agent *"join room X"* if it picked a different default — for example, if it ran outside a git repo and landed in `"main"`.
 
 ## Teach your agent how to use Intermind
 
-Drop this into your agent's system prompt or initial message so its LLM uses Intermind well without you spelling out every call. **Copy-paste:**
+Coding agents won't use Intermind unless their system prompt tells them to. Drop one block in once and they call `inbox` at the start of every turn, pick the room from your git branch, and reply on the right thread — without you babysitting.
+
+**The block lives in one file:** [`docs/agent-system-prompt.md`](./docs/agent-system-prompt.md).
+
+**Recommended install — `@`-include the raw URL** so updates land automatically:
 
 ```
-You have access to Intermind, an MCP server for talking to other coding agents
-working on this same project. Use it to coordinate handoffs, request reviews,
-and broadcast announcements. The tools are:
-
-- register_agent(display_name, role): call ONCE per session before any other
-  Intermind tool. Save the returned `token` for every later call.
-- list_agents(token): see who else is connected. Run this when you start work
-  to know who to talk to.
-- send_message(token, to, body, thread_id?): DM another agent (use their
-  agent_id) or broadcast (`to: "*"`). Pass `thread_id` to continue a previous
-  conversation; omit it to start a new one.
-- inbox(token, mark_read?, limit?): pull pending messages addressed to you.
-  Returns oldest-first. Marks them read by default.
-- wait_for_reply(token, thread_id, timeout_sec?): block until the next
-  message on a thread arrives. Use this when you've asked a peer for input
-  and have nothing useful to do until they reply.
-- whoami(token): confirm your identity.
-
-Conventions:
-- Always register before doing anything else.
-- Always pass `thread_id` when replying to keep conversations grouped.
-- Free-form text in `body`. Diffs go in fenced code blocks. Intermind never
-  inspects the body — it just moves bytes.
-- If `wait_for_reply` times out, the peer hasn't replied yet. Decide whether
-  to wait again, fall back to working alone, or message someone else.
+@https://raw.githubusercontent.com/monkfromearth/intermind/main/docs/agent-system-prompt.md
 ```
+
+Paste that line (or the full block from the file, if your agent doesn't support `@`-includes) into the file your agent reads as its persistent prompt. Pick yours:
+
+<details>
+<summary><b>Claude Code</b> — <code>CLAUDE.md</code> or Skill</summary>
+<br>
+
+Project-scoped (commits to the repo, picked up by the whole team):
+
+```
+CLAUDE.md
+```
+
+User-scoped (every project, just you):
+
+```
+~/.claude/CLAUDE.md
+```
+
+As a Claude Skill (loaded on demand):
+
+```
+~/.claude/skills/intermind/SKILL.md
+```
+
+</details>
+
+<details>
+<summary><b>Codex CLI</b> — <code>AGENTS.md</code></summary>
+<br>
+
+User-scoped:
+
+```
+~/.codex/AGENTS.md
+```
+
+Project-scoped:
+
+```
+.codex/AGENTS.md
+```
+
+</details>
+
+<details>
+<summary><b>Cursor</b> — <code>.cursor/rules/intermind.mdc</code></summary>
+<br>
+
+```
+.cursor/rules/intermind.mdc
+```
+
+Or the legacy single-file form:
+
+```
+.cursorrules
+```
+
+</details>
+
+<details>
+<summary><b>Cline</b> — <code>AGENTS.md</code></summary>
+<br>
+
+```
+AGENTS.md
+```
+
+(in the project root)
+
+</details>
+
+<details>
+<summary><b>Windsurf</b> — global rules</summary>
+<br>
+
+```
+~/.codeium/windsurf/memories/global_rules.md
+```
+
+</details>
+
+<details>
+<summary><b>Continue.dev</b> — <code>config.json</code></summary>
+<br>
+
+Edit `~/.continue/config.json` and set the block as the value of `systemMessage`.
+
+</details>
+
+<details>
+<summary><b>Zed</b> — <code>settings.json</code></summary>
+<br>
+
+Edit `~/.config/zed/settings.json` and add the block to the assistant configuration.
+
+</details>
+
+<details>
+<summary><b>Any other agent</b></summary>
+<br>
+
+Drop it into whatever file your agent treats as its persistent system prompt. The block is intentionally generic — no client-specific phrasing — so the same text works in every prompt file format.
+
+</details>
+
+<details>
+<summary><b>Want stronger guarantees? Hooks and mid-turn delivery</b></summary>
+<br>
+
+The system-prompt block is the universal floor. Coding agents are turn-based, though, so a peer message that lands mid-turn waits until the next `inbox` call. Stack these on top, weakest to strongest:
+
+- **Floor (every client).** The system-prompt block + the imperative descriptions baked into the tool surface (the `inbox` tool's description literally starts with *"Call this at the START of every turn …"*). Works on Cursor, Cline, Windsurf, VS Code, Zed, Continue — anywhere with no host-side hooks.
+- **Claude Code mid-turn (`Monitor` + `intermind watch`).** The agent spawns `intermind watch --token <tok>` once at session start; each new peer message becomes a notification in the agent's context *while* it's mid-turn, without blocking. See [`docs/guides/examples.md`](./docs/guides/examples.md#9-claude-code-monitor--intermind-watch--mid-turn-delivery).
+- **Hooks (Claude Code & Codex).** Claude Code's `UserPromptSubmit` and `Stop` hooks; Codex's `[hooks]` block. They make *"did you check the inbox"* no longer a question — it runs before every prompt and after every turn. See [`docs/guides/examples.md`](./docs/guides/examples.md).
+
+No MCP client today routes arbitrary server-initiated notifications to the agent's context, so each client gets its own delivery path. Full reasoning: [`docs/decisions/0001-message-delivery.md`](./docs/decisions/0001-message-delivery.md).
+
+</details>
 
 ## Tools
 
@@ -415,99 +542,81 @@ The full surface — six tools, no resources, no prompts.
 
 | Tool | Purpose | Returns |
 | --- | --- | --- |
-| `register_agent` | Declare yourself (`display_name`, `role`) and receive a session token. | `{ agent_id, token, display_name, role }` |
+| `join` | Enter a room (`display_name`, `role`, optional `room` — defaults to `"main"`) and receive a session token. | `{ agent_id, token, display_name, role, room, room_size, hint? }` |
 | `whoami` | Confirm your identity from the session token. | `{ agent_id, display_name, role, connected_at }` |
-| `list_agents` | Discover every agent currently registered. Tokens are never returned. | `{ agents: [{ id, display_name, role, connected_at, last_seen }] }` |
-| `send_message` | DM another agent by `agent_id`, or broadcast with `to: "*"`. Optional `thread_id` to continue a conversation. | `{ thread_id, message_ids, delivered, warning? }` |
+| `peers` | List the other agents currently in your room (excludes you). Tokens are never returned. | `{ room, agents: [{ id, display_name, role, room, connected_at, last_seen }] }` |
+| `send` | DM another agent by `agent_id`, or broadcast with `to: "*"` (room-scoped). Optional `thread_id` to continue a conversation. | `{ thread_id, message_ids, delivered, warning? }` |
 | `inbox` | Pull pending (unread) messages addressed to you. Marks them read by default. | `{ messages, count }` |
-| `wait_for_reply` | Long-poll for the next unread message on a thread. Blocks up to `timeout_sec` (default 25s, max 120). | `{ message, timeout }` |
+| `listen` | Long-poll for the next unread message on a thread. Blocks up to `timeout_sec` (default 25s, max 120). | `{ message, timeout }` |
 
-For the full reference — every parameter, return shape, error condition, and example — see [`docs/tools.md`](./docs/guides/tools.md).
+For the full reference — every parameter, return shape, error condition, and example — see [`docs/guides/tools.md`](./docs/guides/tools.md).
 
-Every call after `register_agent` requires the `token` you got back. The server derives identity from the token, so a misbehaving agent can't impersonate someone else by passing a different `agent_id` in arguments.
+Every call after `join` requires the `token` you got back. The server derives identity from the token, so a misbehaving agent can't impersonate someone else by passing a different `agent_id` in arguments.
 
 ## A real conversation under the hood
 
-What the JSON-RPC actually looks like when Claude asks Codex to review a patch:
+What the JSON-RPC actually looks like when Claude asks Codex to review a patch.
 
-```jsonc
-// 1. Both agents register on first connect
-claude  → register_agent { display_name: "Claude",  role: "implementer" }
-        ← { agent_id: "agt_a1b2…", token: "tok_…" }
-codex   → register_agent { display_name: "Codex",   role: "reviewer" }
-        ← { agent_id: "agt_c3d4…", token: "tok_…" }
+**1. Both agents join the same room.** Each picks the room from its current git branch — both repos are on `feature-checkout`.
 
-// 2. Claude finds Codex and sends the patch
-claude  → list_agents { token: "tok_…" }
-        ← { agents: [{ id: "agt_c3d4…", display_name: "Codex", … }] }
-claude  → send_message {
-            token:  "tok_…",
-            to:     "agt_c3d4…",
-            body:   "please review this patch:\n```diff\n…\n```"
-          }
+```text
+claude  → join { display_name: "Claude",  role: "implementer", room: "feature-checkout" }
+        ← { agent_id: "agt_a1b2…", token: "tok_…", room: "feature-checkout", room_size: 0 }
+
+codex   → join { display_name: "Codex",   role: "reviewer",    room: "feature-checkout" }
+        ← { agent_id: "agt_c3d4…", token: "tok_…", room: "feature-checkout", room_size: 1 }
+```
+
+**2. Claude finds Codex and sends the patch.**
+
+```text
+claude  → peers { token: "tok_…" }
+        ← { room: "feature-checkout", agents: [{ id: "agt_c3d4…", display_name: "Codex", … }] }
+
+claude  → send { token: "tok_…", to: "agt_c3d4…", body: "please review:\n```diff\n…\n```" }
         ← { thread_id: "thr_e5f6…", delivered: ["agt_c3d4…"], message_ids: […] }
+```
 
-// 3. Codex blocks waiting for work; the message is already there
-codex   → wait_for_reply {
-            token:     "tok_…",
-            thread_id: "thr_e5f6…",
-            timeout_sec: 60
-          }
+**3. Codex was long-polling for work — the message is already there.**
+
+```text
+codex   → listen { token: "tok_…", thread_id: "thr_e5f6…", timeout_sec: 60 }
         ← { message: { body: "please review …", from_agent: "agt_a1b2…" }, timeout: false }
+```
 
-// 4. Codex reads, thinks, replies on the same thread
-codex   → send_message {
+**4. Codex reads, thinks, replies on the same thread.**
+
+```text
+codex   → send {
             token:     "tok_…",
             to:        "agt_a1b2…",
             thread_id: "thr_e5f6…",
             body:      "line 42 should use unwrap_or; counter-patch:\n```diff\n…\n```"
           }
+```
 
-// 5. Claude was already long-polling; reply lands immediately
-claude  → wait_for_reply { token: "tok_…", thread_id: "thr_e5f6…", timeout_sec: 60 }
+**5. Claude was already long-polling; the reply lands immediately.**
+
+```text
+claude  → listen { token: "tok_…", thread_id: "thr_e5f6…", timeout_sec: 60 }
         ← { message: { body: "line 42 should …", from_agent: "agt_c3d4…" }, timeout: false }
 ```
 
 That's the whole loop. No special tools for diffs, reviews, or tasks — just messages on a thread.
 
-## Recipes
+## Use cases
 
-Common patterns documented in full:
+Real workflows people actually run, with the prompt you give the agent. The full prompt-by-prompt walkthroughs (with the JSON each tool call sends) live in [`docs/guides/examples.md`](./docs/guides/examples.md).
 
-- **Review loop** — implementer ↔ reviewer iterating on a patch over a single thread.
-- **Async coordination** — work in parallel without blocking on a peer.
-- **Broadcast** — announce to the whole room with `to: "*"`.
-- **Parallel threads** — run multiple conversations simultaneously, isolated by `thread_id`.
-- **Hand-off** — agent A finishes, agent B picks up, both keep the thread.
-- **Catching up after a reconnect** — find your old `agent_id` and read history.
-
-See [`docs/recipes.md`](./docs/guides/recipes.md).
-
-## Configuration
-
-| Env var | Default | What it does |
+| Use case | What happens | When to reach for it |
 | --- | --- | --- |
-| `INTERMIND_DB` | `~/.intermind/state.db` | Path to the SQLite file. The default is global per machine — every Intermind subprocess on this laptop opens the same file. Override with a project-local path (e.g. `./.intermind/state.db`) to run a private room; every agent that should join that room needs the same value. |
-
-> **Memory footprint.** Each MCP client launches its own Intermind subprocess, and each subprocess takes ~50 MB of RAM (almost all of it the Bun runtime). Three agents in a room ≈ 150 MB total. Plenty of headroom on any laptop.
-
-## Inspecting state
-
-Intermind is a SQLite file. Use any SQLite tool to inspect it. The two tables you care about are `agents` and `messages`:
-
-```bash
-# Last 20 messages, newest first
-sqlite3 ~/.intermind/state.db \
-  "SELECT created_at, from_agent, to_agent, substr(body, 1, 80) FROM messages ORDER BY created_at DESC LIMIT 20"
-
-# Who's connected
-sqlite3 ~/.intermind/state.db "SELECT id, display_name, role, last_seen FROM agents"
-
-# Full schema
-sqlite3 ~/.intermind/state.db ".schema"
-```
-
-A dedicated observer CLI is intentionally not part of this release — the one-liners above cover ~90% of the value.
+| **Review loop** | Implementer sends a patch, reviewer replies with line-level fixes on the same thread, repeat until both agree. | Two agents, same feature, one writes and one critiques. The classic pair-programming dance. |
+| **Backend ↔ frontend on a feature** | Backend agent on the API repo and frontend agent on the web repo join the same room (auto-picked from the branch name) and trade contracts: *"new endpoint shape is X"*, *"got it, here's how I'm calling it"*. | Two agents in two repos working on one user-visible change. |
+| **Async coordination** | Implementer keeps coding while the reviewer reads in another window. Both `inbox` at the start of every turn instead of blocking on `listen`. | When you don't want one agent stuck waiting on the other. |
+| **Hand-off** | Agent A wraps a chunk of work, posts a status message on a hand-off thread; agent B was long-polling on that thread, picks up where A left off. | Long-running tasks where the user wants to swap who's driving. |
+| **Broadcast** | One agent fires `send({ to: "*", … })` — every other agent in the room gets it. | *"I'm refactoring `parser/`, heads up if you're touching it."* |
+| **Parallel threads** | Same two agents hold multiple conversations at once, isolated by `thread_id` — one for the parser bug, one for the migration. | When the same pair is juggling more than one topic. |
+| **Catching up after a crash** | Your MCP client crashed mid-session. The new session calls `peers` to find its old `agent_id`, then `inbox` with `mark_read: false` to peek at the history. | Recovery — sessions are ephemeral, messages are persisted. |
 
 ## Troubleshooting
 
@@ -516,46 +625,10 @@ The three most common issues:
 | Symptom | Likely cause |
 | --- | --- |
 | **Agent doesn't see the tools** | Forgot to restart the agent after editing config; or `intermind` isn't on `$PATH`. Run `which intermind` to check. |
-| **Two agents can't see each other** | They're in different rooms. The default room is `~/.intermind/state.db` (shared across the whole machine), so this usually means one of them has `INTERMIND_DB` set to something else. Check the `hint` field on `register_agent`'s response — when you're alone, it tells you which file you opened. |
-| **`wait_for_reply` always times out** | Your peer replied without `thread_id` (so it started a new thread), or they aren't actually working. Fall back to `inbox`. |
+| **Two agents can't see each other** | They joined different room names. Each agent picks its room from the current git branch — if one agent ran outside a git repo it landed in `"main"` instead. Ask both agents what room they're in (rule 3 of the [system prompt](./docs/agent-system-prompt.md) makes them announce it on `join`) and re-`join` the laggard with the right name. |
+| **`listen` always times out** | Your peer replied without `thread_id` (so it started a new thread), or they aren't actually working. Fall back to `inbox`. |
 
 For the full troubleshooting guide and how to get help, see [`docs/troubleshooting.md`](./docs/guides/troubleshooting.md).
-
-## Repo layout
-
-```
-src/
-  index.ts        # stdio entrypoint — opens the DB, builds the server, connects the transport
-  server.ts       # buildServer(db): registers all six tools on a fresh McpServer
-  handlers.ts     # the six pure handlers; tests call these directly, no MCP transport
-  schemas.ts      # zod input shapes shared by handlers and MCP tool registrations
-  db.ts           # SQLite open + WAL pragmas + schema (two tables, two indexes)
-test/
-  handlers.test.ts  # unit tests for the pure handlers (in-memory SQLite)
-  server.test.ts    # integration tests through a real MCP Client/Server pair
-docs/             # user guides + contributor explainers
-.github/
-  workflows/      # CI: bun install + typecheck + bun test on Ubuntu and macOS
-CLAUDE.md         # operating notes for AI agents working in this repo
-```
-
-The trust boundary is `server.ts`: it validates every input with the Zod shapes in `schemas.ts`, then calls into `handlers.ts`. Handlers take a `Database` plus already-validated args and return plain objects, so tests exercise them directly without the MCP transport in the loop.
-
-## Development
-
-```bash
-bun install         # install deps
-bun test            # 42 tests, ~5s, all in-memory
-bun run typecheck   # tsc --noEmit
-bun run start       # run the stdio server (default DB at ~/.intermind/state.db)
-```
-
-There are two test files:
-
-- **`test/handlers.test.ts`** — fast unit tests for the pure handler functions.
-- **`test/server.test.ts`** — full integration tests through a real MCP `Client` ↔ `Server` pair, using the SDK's in-memory transport. This is the closest thing to "what Claude Code actually sees" without launching a subprocess.
-
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) before opening a PR. Release history lives in [`CHANGELOG.md`](./CHANGELOG.md); upcoming work in [`ROADMAP.md`](./ROADMAP.md).
 
 ## Documentation
 
@@ -565,7 +638,8 @@ The [`docs/`](./docs/) folder splits into **guides** (how to use Intermind) and 
 
 - [Tool reference](./docs/guides/tools.md) — every parameter, return shape, error, and example.
 - [Wire-up cookbook](./docs/guides/clients.md) — copy-paste configs for every major MCP client.
-- [Recipes](./docs/guides/recipes.md) — review loop, async coordination, broadcast, hand-off patterns.
+- [Examples](./docs/guides/examples.md) — review loop, async coordination, broadcast, hand-off, hook setup.
+- [Worktrees & per-feature rooms](./docs/guides/worktrees.md) — when one feature spans BE and FE in two repos.
 - [Troubleshooting & support](./docs/guides/troubleshooting.md) — common issues, inspection one-liners, where to ask for help.
 
 **Knowledge base** — why Intermind looks this way:
@@ -598,7 +672,7 @@ If you want any of those, see [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`ROADM
 <summary><b>Does this work over the network?</b></summary>
 <br>
 
-No. 0.0.2 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` is one file per machine, so it covers "two agents on my laptop" but stops there. Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
+No. 0.0.3 is stdio-only and assumes local trust (same machine, same user) — it covers "two agents on my laptop" but stops there. Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
 
 </details>
 
@@ -619,18 +693,10 @@ SQLite WAL mode allows concurrent reads and serialises writes. The message volum
 </details>
 
 <details>
-<summary><b>Where does state go when I'm done?</b></summary>
-<br>
-
-Wherever `INTERMIND_DB` points (default `~/.intermind/state.db`). Delete the file to wipe the room. The default lives in your home directory; if you set a project-local `INTERMIND_DB=./.intermind/...`, the repo's `.gitignore` already excludes `.intermind/`.
-
-</details>
-
-<details>
 <summary><b>Can I run more than one room?</b></summary>
 <br>
 
-Yes — start each agent with a different `INTERMIND_DB`. Different file, different room. The default (no env var set) is `~/.intermind/state.db`, the global room.
+Yes — pass a different `room` value to `join`. One pair of agents in `room: "feature-auth"`, another in `room: "feature-billing"`, and they're invisible to each other. The agent defaults to the current git branch name (per the [system prompt](./docs/agent-system-prompt.md)), so per-feature isolation is usually automatic — you don't have to think about it.
 
 </details>
 
@@ -638,7 +704,19 @@ Yes — start each agent with a different `INTERMIND_DB`. Different file, differ
 <summary><b>Can I run agents on different machines?</b></summary>
 <br>
 
-Not today. The default `~/.intermind/state.db` covers everything on one laptop; once you cross machines, you'd need a shared filesystem (and that's not a path we support yet). Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
+Not today. 0.0.3 covers everything on one laptop; cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
+
+</details>
+
+<details>
+<summary><b>How does a peer's message reach me <em>during</em> a turn instead of waiting for my next `inbox` call?</b></summary>
+<br>
+
+Short answer: today, on Claude Code only, via the `Monitor` tool plus a one-line subcommand `intermind watch --token <your_token>`. The system-prompt block tells the agent to spawn that watcher once at session start; it tails the SQLite file and prints one JSON line per new message addressed to you. Claude Code's `Monitor` surfaces each line as a notification in the agent's context, mid-turn. The agent reads it, replies on the same `thread_id`, and goes back to whatever it was doing.
+
+On every other client (Cursor, Cline, Windsurf, Continue, Zed, Codex), the floor is `listen` (long-poll, blocks the turn) plus `inbox` at turn start. That's not as snappy as mid-turn delivery, but it's universal.
+
+The protocol-correct answer — server-push over MCP — doesn't have a delivery path to the agent's context on any client today (elicitation is a server-to-user dialog, not a server-to-agent-context channel). It's on the roadmap; the day a client routes arbitrary server notifications to the agent, we drop the watch subprocess. Full reasoning: [`docs/decisions/0001-message-delivery.md`](./docs/decisions/0001-message-delivery.md).
 
 </details>
 

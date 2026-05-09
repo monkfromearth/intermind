@@ -9,6 +9,11 @@
  *   3. Wrap the return value in MCP's `{ content: [{ type, text }] }`
  *      envelope, or convert a thrown error into an `isError: true`
  *      response so the calling agent's LLM can read the failure.
+ *
+ * Tool descriptions are deliberately imperative ("call this", "do this
+ * before that") because the model reads them at tool-discovery time and
+ * they're the cheapest place to bake in the proactive behaviors that
+ * make agent-to-agent coordination feel alive instead of dead.
  */
 
 import type { Database } from "bun:sqlite";
@@ -17,10 +22,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { handlers } from "./handlers";
 import {
   inboxInput,
-  listAgentsInput,
-  registerAgentInput,
-  sendMessageInput,
-  waitForReplyInput,
+  joinInput,
+  listenInput,
+  peersInput,
+  sendInput,
   whoamiInput,
 } from "./schemas";
 
@@ -59,8 +64,8 @@ function run<T>(fn: () => T | Promise<T>) {
 
 /**
  * Optional knobs for `buildServer`. Only `dbPath` is meaningful today —
- * it gets echoed back in the empty-room hint so a freshly registered
- * agent can tell which file its peers would need to share.
+ * it gets echoed back in the empty-room hint so a freshly-joined agent
+ * can tell which file its peers would need to share.
  */
 export interface BuildServerOptions {
   /** Filesystem path of the SQLite file that backs `db`. */
@@ -82,29 +87,31 @@ export function buildServer(
 ): McpServer {
   // Single source of truth for the server version is package.json;
   // Bun lets us require() it at build time so the compiled binary
-  // reports the real version (e.g. 0.0.2) instead of a stale string.
+  // reports the real version (e.g. 0.0.3) instead of a stale string.
   const { version } = require("../package.json") as { version: string };
   const server = new McpServer({ name: "intermind", version });
 
   server.tool(
-    "register_agent",
-    "Introduce yourself to the room. Returns your agent_id and a session token; pass the token on every subsequent call.",
-    registerAgentInput,
+    "join",
+    "Join a room. Mints your agent_id and a session token — save the token, you need it for every other call. Call this once per session before any other Intermind tool. Pick a `room` name: if you're inside a git repo, use the current branch (run `git branch --show-current`); otherwise pick a short kebab-case label from project context. Defaults to 'main' if omitted. AFTER joining, immediately tell the user the room name you chose — they need to tell their other agents to join the same room. If room_size comes back 0 you're alone; the `hint` field will tell you what to relay.",
+    joinInput,
     async (args) =>
       run(() => {
-        const result = handlers.register_agent(db, args);
-        // If the new agent is alone, surface a hint pointing at the DB
-        // path so they can tell whether their peer is on the same file.
-        // E.g. BE agent in repo A and FE agent in repo B both starting
-        // with the default config will both see room_size: 0 — the hint
-        // is what tells them they're in different rooms instead of just
-        // "nobody else has joined yet".
-        if (result.room_size === 0 && opts.dbPath) {
+        const result = handlers.join(db, args);
+        // If the new agent is alone, surface a hint with the room name
+        // so the LLM can relay it to the user. The user is the only one
+        // who can tell the *other* agent which room name to join with.
+        // E.g. BE agent in repo A picks room "feature-auth" and is
+        // alone — the hint reminds the LLM to say "tell your FE agent
+        // to call join with room: 'feature-auth'".
+        if (result.room_size === 0) {
+          const dbHint = opts.dbPath ? ` (db: ${opts.dbPath})` : "";
           result.hint =
-            `You're alone in this room (db: ${opts.dbPath}). ` +
-            "If another agent should be here, make sure their INTERMIND_DB " +
-            "points at the same file (defaults to ~/.intermind/state.db, " +
-            "shared across every project on this machine).";
+            `You're alone in room '${result.room}'${dbHint}. ` +
+            `Tell the user: "I'm in Intermind room '${result.room}' — ` +
+            `please ask your other agent(s) to join the same room name." ` +
+            `If they're on a different machine, also share INTERMIND_DB ` +
+            `(defaults to ~/.intermind/state.db).`;
         }
         return result;
       }),
@@ -112,37 +119,37 @@ export function buildServer(
 
   server.tool(
     "whoami",
-    "Confirm your identity from a session token.",
+    "Confirm who you are from your session token. Useful as a sanity check or to recover your agent_id if you've lost track.",
     whoamiInput,
     async (args) => run(() => handlers.whoami(db, args)),
   );
 
   server.tool(
-    "list_agents",
-    "List every agent currently registered in this room.",
-    listAgentsInput,
-    async (args) => run(() => handlers.list_agents(db, args)),
+    "peers",
+    "List the other agents in your room — their agent_id, display_name, role, and last_seen timestamp. Returns the room name too so you can confirm where you are. Call this at the start of work to know who you can talk to. Agents in other rooms are invisible.",
+    peersInput,
+    async (args) => run(() => handlers.peers(db, args)),
   );
 
   server.tool(
-    "send_message",
-    "Send a message to another agent (use '*' as `to` to broadcast). Omit thread_id to start a new thread.",
-    sendMessageInput,
-    async (args) => run(() => handlers.send_message(db, args)),
+    "send",
+    "Send a message. Pass a peer's agent_id in `to` for a DM, or '*' to broadcast to every other agent in your room. Omit `thread_id` to start a new conversation; pass an existing thread_id to continue one (always do this on replies — it's how peers keep context across turns). Recipients in other rooms are invisible — you can only message agents who joined the same room you did. The body is free-text; put diffs/code in fenced code blocks.",
+    sendInput,
+    async (args) => run(() => handlers.send(db, args)),
   );
 
   server.tool(
     "inbox",
-    "Pull pending (unread) messages addressed to you. Marks them read by default.",
+    "Pull every unread message addressed to you. Marks them read by default — pass mark_read:false to peek without consuming. Call this at the START of every turn, before doing other work: a peer's message is equivalent to a user request and should be answered first. Returns oldest-first.",
     inboxInput,
     async (args) => run(() => handlers.inbox(db, args)),
   );
 
   server.tool(
-    "wait_for_reply",
-    "Long-poll for the next unread message on a thread. Blocks up to timeout_sec (default 25). Returns immediately if a message is already waiting.",
-    waitForReplyInput,
-    async (args) => run(() => handlers.wait_for_reply(db, args)),
+    "listen",
+    "Block until the next unread message arrives on a thread (up to timeout_sec, default 25, max 120). Use this when you've just sent a message and have nothing useful to do until your peer replies — keeps the conversation hot in the same turn instead of yielding control back to the user. Per-thread; for any-incoming-message use `inbox` instead.",
+    listenInput,
+    async (args) => run(() => handlers.listen(db, args)),
   );
 
   return server;

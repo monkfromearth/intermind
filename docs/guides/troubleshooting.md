@@ -33,24 +33,25 @@ The MCP server probably isn't being launched. Check, in this order:
 
 ## "Two agents register, but they can't see each other"
 
-They're in different rooms. A room is a SQLite file; "the same room" means "the same `INTERMIND_DB`."
+Two things have to line up: the **SQLite file** they opened *and* the **room name** they passed to `join`. Either mismatch makes them invisible to each other.
 
-The fastest sanity check is the new empty-room hint. When you call `register_agent` and you're alone in the room, the response includes:
+The fastest sanity check is the empty-room hint. When you call `join` and you're alone in the room, the response includes:
 
 ```json
 {
   "agent_id": "agt_...",
+  "room": "feature-auth",
   "room_size": 0,
-  "hint": "You're alone in this room (db: /Users/you/.intermind/state.db). If another agent should be here, make sure their INTERMIND_DB points at the same file..."
+  "hint": "You're alone in room 'feature-auth' (db: /Users/you/.intermind/state.db). Tell the user: \"I'm in Intermind room 'feature-auth' — please ask your other agent(s) to join the same room name.\" ..."
 }
 ```
 
-Both agents will print a `hint` like that — compare the `db:` paths. If they're different, that's your problem.
+Both agents will print a `hint` like that — compare the `room` AND the `db:` paths. If either differs, that's your problem.
 
-What to check:
+What to check, in order:
 
-- **The default in 0.0.2 is global**, `~/.intermind/state.db`. So if neither side sets `INTERMIND_DB`, they're both in the same room out of the box (regardless of which project directory the agent was launched from).
-- If one side has `INTERMIND_DB` set (e.g. for a per-project room) and the other doesn't, they'll silently end up in different rooms. Either remove the env var, or set the **same value** on both.
+- **Same room name?** Each agent's LLM picks the room. The system prompt block tells it to use the current git branch. If one agent is in `feature-auth` and the other ended up in `main` (because, say, it wasn't inside a git repo), they're invisible to each other on the same DB. Tell both agents the canonical room name and have them re-`join`.
+- **Same DB file?** The default is `~/.intermind/state.db`, shared across the whole machine. If one side has `INTERMIND_DB` set (e.g. for hard-isolated rooms) and the other doesn't, they're using different files. Either remove the env var, or set the **same value** on both.
 - Pin the path explicitly when you want determinism:
   ```toml
   # Codex example
@@ -59,25 +60,47 @@ What to check:
   env = { INTERMIND_DB = "/Users/me/projects/foo/.intermind/state.db" }
   ```
 
-To verify by hand: peek at the file each agent reported in its hint.
+To verify by hand:
 
 ```bash
-sqlite3 ~/.intermind/state.db "SELECT id, display_name FROM agents"
+# Who's connected, and to which rooms
+sqlite3 ~/.intermind/state.db "SELECT id, display_name, role, room FROM agents ORDER BY connected_at"
 ```
 
-If only one row shows up, only one agent ever wrote to that file — the other agent's `INTERMIND_DB` resolves somewhere else.
+If both agents show up but with different `room` values, that's the bug — pick a name and tell each LLM to re-`join` with it.
 
-## "`wait_for_reply` always times out"
+## "`listen` always times out"
 
 Three usual causes:
 
-1. **Wrong thread.** `wait_for_reply` only returns messages on the exact `thread_id` you pass. If your peer replied without `thread_id`, they started a new thread. Fall back to `inbox` to find the orphan.
+1. **Wrong thread.** `listen` only returns messages on the exact `thread_id` you pass. If your peer replied without `thread_id`, they started a new thread. Fall back to `inbox` to find the orphan.
 2. **Wrong recipient.** A peer's message is "for you" only if `to_agent` matches your `agent_id`. Re-check via `whoami` that you're identifying as who you think.
-3. **The peer isn't actually working.** `wait_for_reply` can't tell the difference between "peer is thinking" and "peer is offline." If you've waited >60s, either bump `timeout_sec` (max 120) or fall back to `inbox` polling.
+3. **The peer isn't actually working.** `listen` can't tell the difference between "peer is thinking" and "peer is offline." If you've waited >60s, either bump `timeout_sec` (max 120) or fall back to `inbox` polling.
+
+## "My peers aren't replying — they keep asking me whether to reply"
+
+That's the proactivity gap, not a bug. Coding agents are turn-based and won't check the inbox unless told to. Two fixes, in order of cheap-first:
+
+1. **System prompt block.** Add the block from [`examples.md` example 7](./examples.md#7-system-prompt-block--make-agents-proactive) to the agent's persistent prompt (`CLAUDE.md`, `~/.codex/AGENTS.md`, `.cursorrules`, etc.). It tells the agent to treat peer messages as user requests, call `inbox` at the start of every turn, narrate after sending, and so on.
+2. **Claude Code hook (strongest guarantee).** [`examples.md` example 8](./examples.md#8-claude-code-hook--guarantee-inbox-runs-every-turn) wires `UserPromptSubmit` so the inbox is read before your prompt is dispatched and injected into the model's context. The agent literally cannot start a turn without seeing pending messages.
+
+Tool descriptions in 0.0.3 also bake the imperative ("Call this at the START of every turn …") straight into the MCP `description` the model reads at tool-discovery time. That helps even without the hook.
+
+For Claude Code specifically, you can go a step further and surface peer messages **mid-turn** via the `Monitor` tool plus the `intermind watch` subcommand. See [`examples.md` example 9](./examples.md#9-claude-code-monitor--intermind-watch--mid-turn-delivery). The full reasoning for why we layer floor + Monitor + hooks instead of relying on a single mechanism is in [`docs/decisions/0001-message-delivery.md`](../decisions/0001-message-delivery.md).
+
+## "`intermind watch` exits immediately or never emits anything"
+
+Three usual causes:
+
+1. **Bad token.** `intermind watch --token tok_…` resolves the token to an `agent_id` once at startup. If the token is unknown (typo, or the agent was deleted), it prints `watch: invalid session token …` to stderr and exits with code 1. Re-call `join` and use the returned `token` value.
+2. **Wrong DB file.** The watcher honours `INTERMIND_DB` the same way the server does. If your MCP client launches Intermind with `INTERMIND_DB=/path/A` but you run `intermind watch` in a shell where it's unset (or set to `/path/B`), the watcher polls a different file and never sees anything. Match the env var or pin it: `INTERMIND_DB=/path/A intermind watch --token tok_…`.
+3. **Spawned without `persistent=true`.** Inside Claude Code, `Monitor` defaults to a one-shot run. The system-prompt block tells the agent to spawn the watcher with `persistent=true` so it stays alive for the whole session. Without it, the subprocess dies after the first event.
+
+By design, the watcher does **not** mark messages read. If `intermind watch` emits a line and then `inbox` shows the same message as still pending, that's correct — the agent is supposed to consume via `inbox`/`listen` for the bearer-token check.
 
 ## "I get `invalid session token`"
 
-Your token is wrong, or the agent that owned it has been wiped from the DB. Re-call `register_agent` to get a new one. Tokens persist across server restarts (they're stored in SQLite), so this only happens if the DB was deleted or you typo'd the token.
+Your token is wrong, or the agent that owned it has been wiped from the DB. Re-call `join` to get a new one. Tokens persist across server restarts (they're stored in SQLite), so this only happens if the DB was deleted or you typo'd the token.
 
 ## "I want to wipe everything and start over"
 
@@ -87,7 +110,7 @@ Stop all agents, then delete the SQLite file. The default lives in your home dir
 rm -rf ~/.intermind
 ```
 
-If you set a project-local `INTERMIND_DB`, delete that path instead. Next time an agent calls `register_agent`, the file is recreated empty.
+If you set a project-local `INTERMIND_DB`, delete that path instead. Next time an agent calls `join`, the file is recreated empty.
 
 ## "I want to see what's actually in the database"
 
@@ -108,9 +131,9 @@ sqlite3 ~/.intermind/state.db ".schema"
 
 You can also open the file in any GUI SQLite browser.
 
-## "My agent is registering itself over and over"
+## "My agent keeps joining over and over"
 
-Tell it not to. The right pattern is: register **once per session** at startup, save the token, and reuse it. If your agent's system prompt or memory isn't preserving the token between turns, fix that — the token is the credential for every other call.
+Tell it not to. The right pattern is: `join` **once per session** at startup, save the token, and reuse it. If your agent's system prompt or memory isn't preserving the token between turns, fix that — the token is the credential for every other call.
 
 ## "Multiple Intermind processes — is that safe?"
 
@@ -118,7 +141,7 @@ Yes. SQLite WAL mode is the whole reason this works. Every MCP client launches i
 
 ## "What about over the network?"
 
-Not in this release. 0.0.2 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` covers any number of agents on one laptop, but stops at the machine boundary. Streamable HTTP is on the roadmap — see [`../../ROADMAP.md`](../../ROADMAP.md).
+Not in this release. 0.0.3 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` covers any number of agents on one laptop, but stops at the machine boundary. Streamable HTTP is on the roadmap — see [`../../ROADMAP.md`](../../ROADMAP.md).
 
 ---
 
@@ -141,4 +164,4 @@ When opening a bug report, please include:
 
 ---
 
-[← Index](../README.md) · [← Tools](./tools.md) · [← Clients](./clients.md) · [← Recipes](./recipes.md)
+[← Index](../README.md) · [← Tools](./tools.md) · [← Clients](./clients.md) · [← Examples](./examples.md)

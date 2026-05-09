@@ -19,7 +19,7 @@ The connection inside a host that talks to one MCP server. A host has many clien
 A process exposing capabilities (tools, resources, prompts). **Intermind is a server.**
 
 ### Tool
-A typed action the LLM can invoke through MCP. e.g. `send_message`. Intermind exposes exactly six tools.
+A typed action the LLM can invoke through MCP. e.g. `send`. Intermind exposes exactly six tools.
 
 ### Resource
 Read-only addressable data exposed by a server. e.g. `agents://`, `threads://thr_42`.
@@ -49,13 +49,13 @@ HTTP-based transport with bidirectional streaming. Replaced HTTP+SSE in the 2025
 In Intermind: a registered, identified MCP client (Claude Code, Codex, etc.). Has an `agent_id`, a `display_name`, and a `role`.
 
 ### Mailbox
-The metaphor for how Intermind delivers messages — agents read pending messages addressed to them via `inbox` or block on `wait_for_reply`. Intermind's *entire* product surface is the mailbox.
+The metaphor for how Intermind delivers messages — agents read pending messages addressed to them via `inbox` or block on `listen`. Intermind's *entire* product surface is the mailbox.
 
 ### Thread
 A grouped sequence of messages on the same topic, identified by `thread_id`. Reviews, hand-offs, and any back-and-forth conversation are threads.
 
 ### Long-poll
-A way for an agent to wait efficiently for new messages: it calls `wait_for_reply`, the server holds the call open until a message arrives or a timeout hits. Avoids both the latency of short-polling and the complexity of true server-push.
+A way for an agent to wait efficiently for new messages: it calls `listen`, the server holds the call open until a message arrives or a timeout hits. Avoids both the latency of short-polling and the complexity of true server-push.
 
 ### Scope (Claude Code)
 Where an MCP server is registered: `user` (global), `project` (committed to repo as `.mcp.json`), or `enterprise` (managed by IT).

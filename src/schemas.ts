@@ -18,12 +18,22 @@ const THREAD_ID = z.string().min(1);
 const AGENT_ID_OR_BROADCAST = z
   .string()
   .min(1)
-  .describe("recipient agent_id, or '*' to broadcast to every other agent");
+  .describe("recipient agent_id, or '*' to broadcast to every other agent in your room");
+// Room names are short labels, same length cap as display_name/role. The
+// LLM is told to derive this from the current git branch (e.g. "main",
+// "feature-auth"); the bound keeps a misbehaving caller from inserting
+// a 10 KB room name and bloating the schema.
+const ROOM = z.string().min(1).max(64);
 
-/** `register_agent` — declare yourself, receive a session token. */
-export const registerAgentInput = {
+/** `join` — declare yourself, receive a session token. */
+export const joinInput = {
   display_name: NAME,
   role: NAME,
+  // Optional room name. Defaults to "main" when omitted, so 0.0.2-style
+  // callers that don't know about rooms keep working. Two agents in the
+  // same room see each other; agents in different rooms are invisible to
+  // one another even on the same DB file.
+  room: ROOM.optional(),
 } as const;
 
 /** `whoami` — confirm identity from a session token. */
@@ -31,13 +41,13 @@ export const whoamiInput = {
   token: TOKEN,
 } as const;
 
-/** `list_agents` — list everyone currently registered. */
-export const listAgentsInput = {
+/** `peers` — list everyone currently in your room. */
+export const peersInput = {
   token: TOKEN,
 } as const;
 
-/** `send_message` — DM another agent or broadcast to the room. */
-export const sendMessageInput = {
+/** `send` — DM another agent or broadcast to the room. */
+export const sendInput = {
   token: TOKEN,
   to: AGENT_ID_OR_BROADCAST,
   thread_id: THREAD_ID.optional(),
@@ -51,8 +61,8 @@ export const inboxInput = {
   limit: z.number().int().positive().max(100).optional(),
 } as const;
 
-/** `wait_for_reply` — long-poll for the next unread message on a thread. */
-export const waitForReplyInput = {
+/** `listen` — long-poll for the next unread message on a thread. */
+export const listenInput = {
   token: TOKEN,
   thread_id: THREAD_ID,
   timeout_sec: z.number().int().positive().max(120).optional(),

@@ -22,7 +22,7 @@ JSON-RPC 2.0 messages over a transport (stdio or Streamable HTTP — see [`03-tr
 
 ## What a server can offer (server primitives)
 
-- **Tools** — actions the LLM can invoke, with typed inputs and outputs. e.g. `send_message`, `inbox`. Intermind's entire surface is tools (six of them) plus a couple of resources.
+- **Tools** — actions the LLM can invoke, with typed inputs and outputs. e.g. `send`, `inbox`. Intermind's entire surface is tools (six of them) plus a couple of resources.
 - **Resources** — addressable read-only data, like files. e.g. `agents://`, `threads://`. The host can list and read them without a tool call.
 - **Prompts** — pre-written prompt templates the host can show the user as slash commands. Optional; Intermind doesn't ship any.
 

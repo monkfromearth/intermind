@@ -12,8 +12,8 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
- * A row in the `agents` table. Created when an agent calls
- * `register_agent`; persists for the lifetime of the SQLite file.
+ * A row in the `agents` table. Created when an agent calls `join`;
+ * persists for the lifetime of the SQLite file.
  *
  * `session_token` is the credential used to authenticate every later
  * tool call. Treat it like a password — never hand it back to anyone
@@ -26,6 +26,14 @@ export interface AgentRow {
   display_name: string;
   /** Free-text role label (e.g. "implementer", "reviewer"). */
   role: string;
+  /**
+   * Room name. Two agents see each other only when they joined the same
+   * room. Defaults to `"main"` when the caller of `join` omits it. Picked
+   * by the calling LLM, typically from the current git branch (e.g.
+   * `"main"`, `"feature-auth"`) so peers in the same worktree converge
+   * on the same name without coordinating through the user.
+   */
+  room: string;
   /** Bearer token used to authenticate this agent on every later call. */
   session_token: string;
   /** Unix epoch ms when the agent registered. */
@@ -37,9 +45,9 @@ export interface AgentRow {
 /**
  * A row in the `messages` table.
  *
- * Each row has exactly one recipient. A broadcast (`to: '*'` in
- * `send_message`) is expanded at send time into one row per recipient,
- * so the inbox query stays a simple `WHERE to_agent = ?`.
+ * Each row has exactly one recipient. A broadcast (`to: '*'` in `send`)
+ * is expanded at send time into one row per recipient, so the inbox
+ * query stays a simple `WHERE to_agent = ?`.
  *
  * `read_at IS NULL` means the message is still pending in the
  * recipient's inbox.
@@ -63,10 +71,15 @@ export interface MessageRow {
  * which we avoid).
  */
 const SCHEMA_STATEMENTS: readonly string[] = [
+  // The `room` column gates everything: peers, inbox, listen, send-broadcast
+  // all filter by the caller's room. Default `'main'` keeps callers that
+  // omit the new optional `room` arg working — they all land in the same
+  // shared room, which matches 0.0.2 behaviour exactly.
   `CREATE TABLE IF NOT EXISTS agents (
      id              TEXT PRIMARY KEY,
      display_name    TEXT NOT NULL,
      role            TEXT NOT NULL,
+     room            TEXT NOT NULL DEFAULT 'main',
      session_token   TEXT NOT NULL UNIQUE,
      connected_at    INTEGER NOT NULL,
      last_seen       INTEGER NOT NULL
@@ -84,6 +97,7 @@ const SCHEMA_STATEMENTS: readonly string[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS idx_messages_inbox  ON messages(to_agent, read_at, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_agents_room     ON agents(room)`,
 ];
 
 /**

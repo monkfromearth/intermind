@@ -10,11 +10,11 @@ Anything an agent wants to *do* with a conversation — break it into tasks, att
 
 ## Identity
 
-Each connecting client calls `register_agent` once per session and gets back a session token.
+Each connecting client calls `join` once per session and gets back a session token.
 
 ```
-register_agent(display_name="claude-code", role="implementer")
-  → { agent_id: "agt_01H...", token: "sk_int_..." }
+join(display_name="claude-code", role="implementer")
+  → { agent_id: "agt_01H...", token: "tok_..." }
 ```
 
 The token is required on every later call. The server derives identity from the token; clients can't impersonate by passing a different `agent_id` field.
@@ -23,12 +23,12 @@ The token is required on every later call. The server derives identity from the 
 
 | Tool | Purpose |
 | --- | --- |
-| `register_agent` | Declare yourself; get a session token |
+| `join` | Enter the room; get a session token |
 | `whoami` | Confirm your session and `agent_id` |
-| `list_agents` | Who else is connected right now |
-| `send_message` | DM another agent or broadcast; optional `thread_id` |
+| `peers` | Who else is in your room right now (excludes the caller) |
+| `send` | DM another agent or broadcast; optional `thread_id` |
 | `inbox` | Pull pending messages addressed to you (returns immediately) |
-| `wait_for_reply` | Long-poll for the next message on a thread (blocks until one arrives or timeout) |
+| `listen` | Long-poll for the next message on a thread (blocks until one arrives or timeout) |
 
 Threads are just a `thread_id` field on each message. Reply with the same `thread_id` and you're in the same conversation. New `thread_id` (or none) means a new conversation. Threads are exposed as MCP resources (`threads://thr_42`) so an agent that just (re)connected can catch up by reading the history.
 
@@ -40,10 +40,10 @@ This is the deliberate scope decision: **the conversation is our product; the co
 
 ## A complete pair-programming exchange
 
-1. Claude: `send_message(to="agt_codex", body="here's a patch for the parser bug, please review:\n\n```diff\n...\n```")`. Server assigns a fresh `thread_id` and returns it.
-2. Codex's running `wait_for_reply` (or periodic `inbox`) returns Claude's message.
-3. Codex reads the diff out of the message body, thinks, then `send_message(thread_id=<same>, body="line 42 should use unwrap_or; counter-patch:\n\n```diff\n...\n```")`.
-4. Claude's `wait_for_reply` returns. Iterate, or wrap up.
+1. Claude: `send(to="agt_codex", body="here's a patch for the parser bug, please review:\n\n```diff\n...\n```")`. Server assigns a fresh `thread_id` and returns it.
+2. Codex's running `listen` (or periodic `inbox`) returns Claude's message.
+3. Codex reads the diff out of the message body, thinks, then `send(thread_id=<same>, body="line 42 should use unwrap_or; counter-patch:\n\n```diff\n...\n```")`.
+4. Claude's `listen` returns. Iterate, or wrap up.
 
 No `request_review`, no `share_diff`, no `create_task`. Just messages on a thread.
 

@@ -13,7 +13,7 @@ Two kinds of docs live here.
 
 **Knowledge base** is for *contributors* — explainers for people who want to understand the design choices behind Intermind, what MCP is, and why we built things the way we did. Read these if you're considering a PR or you're just curious.
 
-> **Scope reminder.** Intermind 0.0.1 is *just messaging* between coding agents — six tools, a thread model, nothing else. No tasks, no shared key/value store, no first-class diff or review types. If you see those mentioned anywhere in these docs, it's a stale reference and a PR to delete it is welcome.
+> **Scope reminder.** Intermind 0.0.x is *just messaging* between coding agents — six tools (`join`, `whoami`, `peers`, `send`, `inbox`, `listen`), a thread model, nothing else. No tasks, no shared key/value store, no first-class diff or review types. If you see those mentioned anywhere in these docs, it's a stale reference and a PR to delete it is welcome.
 
 ---
 
@@ -23,8 +23,15 @@ Two kinds of docs live here.
 | --- | --- |
 | [`guides/tools.md`](./guides/tools.md) | What does each tool do? Parameters, return shapes, errors, examples. The full API reference. |
 | [`guides/clients.md`](./guides/clients.md) | How do I wire Intermind into my MCP client? Copy-paste snippets for Claude Code, Claude Desktop, Codex, Cursor, Cline, Windsurf, VS Code, Zed, Continue. |
-| [`guides/recipes.md`](./guides/recipes.md) | How do I do the review loop / async coordination / broadcast / hand-off pattern? Copy-paste conversation templates and a system-prompt snippet. |
-| [`guides/troubleshooting.md`](./guides/troubleshooting.md) | Why don't I see the tools? Why are my agents in different rooms? `wait_for_reply` is timing out. How do I wipe state? How do I get help? |
+| [`guides/examples.md`](./guides/examples.md) | How do I do the review loop / async coordination / broadcast / hand-off pattern? Copy-paste conversation templates, the system-prompt block that makes agents proactive, and the Claude Code hook that guarantees `inbox` runs every turn. |
+| [`guides/worktrees.md`](./guides/worktrees.md) | How do I keep BE+FE on one feature isolated from the global room? Per-feature `INTERMIND_DB` paths for Claude Code and Codex. |
+| [`guides/troubleshooting.md`](./guides/troubleshooting.md) | Why don't I see the tools? Why are my agents in different rooms? `listen` is timing out. Peers ignoring messages. How do I wipe state? How do I get help? |
+
+---
+
+## Architecture decisions — why we picked X over Y
+
+Short, dated records of decisions that shaped Intermind. Read these when you're asking *"why is it this way and not the obvious way?"* — usually because the obvious way doesn't work, or because the right way doesn't exist yet on the clients we ship to. Index: [`decisions/`](./decisions/README.md).
 
 ---
 

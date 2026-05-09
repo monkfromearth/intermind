@@ -4,11 +4,10 @@
  * decoupled from the MCP transport layer so tests can call them
  * directly without spinning up the SDK.
  *
- * Authentication: every handler except `register_agent` calls
- * `authenticate()` first, which both verifies the session token and
- * bumps the agent's `last_seen` timestamp. Handlers never trust an
- * `agent_id` passed in arguments — they always derive identity from
- * the token.
+ * Authentication: every handler except `join` calls `authenticate()`
+ * first, which both verifies the session token and bumps the agent's
+ * `last_seen` timestamp. Handlers never trust an `agent_id` passed in
+ * arguments — they always derive identity from the token.
  */
 
 import { Database } from "bun:sqlite";
@@ -41,9 +40,9 @@ const DEFAULT_INBOX_LIMIT = 50;
 const MAX_INBOX_LIMIT = 100;
 const DEFAULT_WAIT_TIMEOUT_SEC = 25;
 /**
- * Poll interval inside `wait_for_reply`. Trades latency for SQLite churn.
- * Not exposed over MCP — it's a handler-internal knob the test suite uses
- * to keep tests fast.
+ * Poll interval inside `listen`. Trades latency for SQLite churn.
+ * Not exposed over MCP — it's a handler-internal knob the test suite
+ * uses to keep tests fast.
  */
 const DEFAULT_POLL_MS = 200;
 
@@ -62,7 +61,7 @@ function authenticate(db: Database, token: string): AgentRow {
     .get(token) as AgentRow | null;
 
   if (!row) {
-    throw new Error("invalid session token; call register_agent first");
+    throw new Error("invalid session token; call join first");
   }
 
   db.run("UPDATE agents SET last_seen = ? WHERE id = ?", [Date.now(), row.id]);
@@ -73,26 +72,36 @@ function authenticate(db: Database, token: string): AgentRow {
 /* handler argument & return types                                     */
 /* ------------------------------------------------------------------ */
 
-export interface RegisterAgentArgs {
+export interface JoinArgs {
   display_name: string;
   role: string;
+  /**
+   * Optional room name. Defaults to `"main"` when omitted. Two agents
+   * see each other only when they joined the same room. Picked by the
+   * calling LLM (typically from the current git branch — `"main"`,
+   * `"feature-auth"`) so peers in the same worktree converge without
+   * coordinating through the user.
+   */
+  room?: string;
 }
 
-export interface RegisterAgentResult {
+export interface JoinResult {
   agent_id: string;
   /** The session token. The caller must keep this private. */
   token: string;
   display_name: string;
   role: string;
+  /** Room the agent landed in. Echoes back the input or the default. */
+  room: string;
   /**
    * Number of *other* agents in this room at registration time. 0 means
    * the caller is alone — useful so the server layer can decide whether
-   * to attach an "are you sure you wired up the same DB?" hint.
+   * to attach an "are you sure your peer is on the same room?" hint.
    */
   room_size: number;
   /**
-   * Optional onboarding hint (e.g. "you're alone in this room — set
-   * INTERMIND_DB to share with another project"). Set by the server
+   * Optional onboarding hint (e.g. "you're alone in this room — tell
+   * your peer to call join with room: '<name>'"). Set by the server
    * layer because the handler doesn't know the configured db path.
    */
   hint?: string;
@@ -111,11 +120,14 @@ export interface WhoamiResult {
 
 export type AgentSummary = Omit<AgentRow, "session_token">;
 
-export interface ListAgentsResult {
+export interface PeersResult {
+  /** The room the caller is in (so the LLM can confirm and tell the user). */
+  room: string;
+  /** Other agents in the same room. The caller is excluded from this list. */
   agents: AgentSummary[];
 }
 
-export interface SendMessageArgs extends AuthedArgs {
+export interface SendArgs extends AuthedArgs {
   /** Recipient `agent_id`, or `'*'` to broadcast to every other agent. */
   to: string;
   /** Optional thread id; omit to start a new thread. */
@@ -123,7 +135,7 @@ export interface SendMessageArgs extends AuthedArgs {
   body: string;
 }
 
-export interface SendMessageResult {
+export interface SendResult {
   thread_id: string;
   message_ids: string[];
   delivered: string[];
@@ -143,7 +155,7 @@ export interface InboxResult {
   count: number;
 }
 
-export interface WaitForReplyArgs extends AuthedArgs {
+export interface ListenArgs extends AuthedArgs {
   thread_id: string;
   /** Maximum seconds to block. Default: 25. */
   timeout_sec?: number;
@@ -151,7 +163,7 @@ export interface WaitForReplyArgs extends AuthedArgs {
   poll_ms?: number;
 }
 
-export interface WaitForReplyResult {
+export interface ListenResult {
   message: MessageRow | null;
   timeout: boolean;
 }
@@ -161,39 +173,40 @@ export interface WaitForReplyResult {
 /* ------------------------------------------------------------------ */
 
 /**
- * Register a new agent and mint a session token.
+ * Join the room: register a new agent and mint a session token.
  *
  * The returned `token` is the credential for every later call. The
  * server uses it to identify the caller; agents cannot impersonate each
  * other by passing a different `agent_id` in arguments.
  */
-function register_agent(
-  db: Database,
-  args: RegisterAgentArgs,
-): RegisterAgentResult {
+function join(db: Database, args: JoinArgs): JoinResult {
   const id = newId("agent");
   const token = newId("token");
   const now = Date.now();
+  // Default room "main" preserves 0.0.2 behaviour exactly — callers
+  // that don't pass `room` all land together in the same shared room.
+  const room = args.room ?? "main";
 
   db.run(
-    "INSERT INTO agents (id, display_name, role, session_token, connected_at, last_seen) VALUES (?,?,?,?,?,?)",
-    [id, args.display_name, args.role, token, now, now],
+    "INSERT INTO agents (id, display_name, role, room, session_token, connected_at, last_seen) VALUES (?,?,?,?,?,?,?)",
+    [id, args.display_name, args.role, room, token, now, now],
   );
 
-  // Count peers (everybody except us) so the caller can tell whether
-  // they just walked into an empty room. Two Claude Code sessions in
-  // different project dirs both registering and seeing room_size: 0 is
-  // the canonical "you forgot to share INTERMIND_DB" symptom.
-  const peers = db
-    .query("SELECT COUNT(*) AS n FROM agents WHERE id != ?")
-    .get(id) as { n: number };
+  // Count peers in the *same room* (excluding us). Agents in other
+  // rooms on the same DB file are invisible. Example: BE joined room
+  // "feature-auth" and FE joined room "main" — both see room_size: 0
+  // and the empty-room hint tells them to converge on one room name.
+  const peer_count = db
+    .query("SELECT COUNT(*) AS n FROM agents WHERE id != ? AND room = ?")
+    .get(id, room) as { n: number };
 
   return {
     agent_id: id,
     token,
     display_name: args.display_name,
     role: args.role,
-    room_size: peers.n,
+    room,
+    room_size: peer_count.n,
   };
 }
 
@@ -209,20 +222,24 @@ function whoami(db: Database, args: AuthedArgs): WhoamiResult {
 }
 
 /**
- * List every agent currently registered. Returns them ordered by
- * `connected_at`; the caller's session token is *not* included in any
- * returned row.
+ * List peers — every agent currently in the caller's room, except the
+ * caller themselves. Ordered by `connected_at`; session tokens are
+ * never included. Agents in other rooms on the same DB file are
+ * invisible by design.
  */
-function list_agents(db: Database, args: AuthedArgs): ListAgentsResult {
-  authenticate(db, args.token);
+function peers(db: Database, args: AuthedArgs): PeersResult {
+  const me = authenticate(db, args.token);
 
+  // Filter by room *and* exclude self, so the returned list is exactly
+  // "who can I talk to right now." Excluding self is what makes the
+  // result directly usable as candidate `to:` values for `send`.
   const rows = db
     .query(
-      "SELECT id, display_name, role, connected_at, last_seen FROM agents ORDER BY connected_at",
+      "SELECT id, display_name, role, room, connected_at, last_seen FROM agents WHERE room = ? AND id != ? ORDER BY connected_at",
     )
-    .all() as AgentSummary[];
+    .all(me.room, me.id) as AgentSummary[];
 
-  return { agents: rows };
+  return { room: me.room, agents: rows };
 }
 
 /**
@@ -237,15 +254,12 @@ function list_agents(db: Database, args: AuthedArgs): ListAgentsResult {
  *
  * @throws {Error} if `to` is neither `'*'` nor a known `agent_id`.
  */
-function send_message(
-  db: Database,
-  args: SendMessageArgs,
-): SendMessageResult {
+function send(db: Database, args: SendArgs): SendResult {
   const me = authenticate(db, args.token);
   const thread_id = args.thread_id ?? newId("thread");
   const created_at = Date.now();
 
-  const recipients = resolveRecipients(db, me.id, args.to);
+  const recipients = resolveRecipients(db, me.id, me.room, args.to);
 
   if (recipients.length === 0) {
     return {
@@ -277,26 +291,33 @@ function send_message(
 }
 
 /**
- * Resolve a `to` value into the concrete list of recipient agent_ids.
+ * Resolve a `to` value into the concrete list of recipient agent_ids,
+ * scoped to the sender's room.
  *
- * - `'*'` → every agent except the sender.
- * - any other string → that exact `agent_id`, or throws.
+ * - `'*'` → every agent in the same room as the sender, except the sender.
+ * - any other string → that exact `agent_id`, but only if it's in the
+ *   sender's room. Cross-room sends throw — agents in other rooms are
+ *   invisible by design.
  */
 function resolveRecipients(
   db: Database,
   fromAgent: string,
+  fromRoom: string,
   to: string,
 ): string[] {
   if (to === "*") {
     const rows = db
-      .query("SELECT id FROM agents WHERE id != ?")
-      .all(fromAgent) as Array<{ id: string }>;
+      .query("SELECT id FROM agents WHERE id != ? AND room = ?")
+      .all(fromAgent, fromRoom) as Array<{ id: string }>;
     return rows.map((r) => r.id);
   }
 
+  // Only resolve agents that share the caller's room. An agent_id that
+  // exists in a different room behaves the same as a non-existent id —
+  // the sender shouldn't be able to confirm presence across rooms.
   const target = db
-    .query("SELECT id FROM agents WHERE id = ?")
-    .get(to) as { id: string } | null;
+    .query("SELECT id FROM agents WHERE id = ? AND room = ?")
+    .get(to, fromRoom) as { id: string } | null;
 
   if (!target) {
     throw new Error(`unknown recipient agent_id: ${to}`);
@@ -344,17 +365,17 @@ function markRead(db: Database, messageIds: string[]): void {
 }
 
 /**
- * Long-poll for the next unread message on a thread. Returns
+ * Listen on a thread: long-poll for the next unread message. Returns
  * immediately if a message is already waiting; otherwise blocks up to
  * `timeout_sec` (default 25), polling SQLite every `poll_ms` (default
  * 200ms) until something arrives.
  *
  * Returning a message also marks it read.
  */
-async function wait_for_reply(
+async function listen(
   db: Database,
-  args: WaitForReplyArgs,
-): Promise<WaitForReplyResult> {
+  args: ListenArgs,
+): Promise<ListenResult> {
   const me = authenticate(db, args.token);
   const timeout_ms = (args.timeout_sec ?? DEFAULT_WAIT_TIMEOUT_SEC) * 1000;
   const poll_ms = args.poll_ms ?? DEFAULT_POLL_MS;
@@ -390,10 +411,10 @@ async function wait_for_reply(
  * object gives tests a transport-free way to exercise every tool.
  */
 export const handlers = {
-  register_agent,
+  join,
   whoami,
-  list_agents,
-  send_message,
+  peers,
+  send,
   inbox,
-  wait_for_reply,
+  listen,
 } as const;
