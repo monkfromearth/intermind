@@ -49,7 +49,7 @@ Both agents will print a `hint` like that — compare the `db:` paths. If they'r
 
 What to check:
 
-- **The default in 0.1.0 is global**, `~/.intermind/state.db`. So if neither side sets `INTERMIND_DB`, they're both in the same room out of the box (regardless of which project directory the agent was launched from).
+- **The default in 0.0.2 is global**, `~/.intermind/state.db`. So if neither side sets `INTERMIND_DB`, they're both in the same room out of the box (regardless of which project directory the agent was launched from).
 - If one side has `INTERMIND_DB` set (e.g. for a per-project room) and the other doesn't, they'll silently end up in different rooms. Either remove the env var, or set the **same value** on both.
 - Pin the path explicitly when you want determinism:
   ```toml
@@ -118,7 +118,7 @@ Yes. SQLite WAL mode is the whole reason this works. Every MCP client launches i
 
 ## "What about over the network?"
 
-Not in this release. 0.1.0 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` covers any number of agents on one laptop, but stops at the machine boundary. Streamable HTTP is on the roadmap — see [`../../ROADMAP.md`](../../ROADMAP.md).
+Not in this release. 0.0.2 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` covers any number of agents on one laptop, but stops at the machine boundary. Streamable HTTP is on the roadmap — see [`../../ROADMAP.md`](../../ROADMAP.md).
 
 ---
 

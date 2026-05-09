@@ -9,11 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Added
 - Nothing yet.
 
-## [0.1.0] — 2026-05-09
+## [0.0.2] — 2026-05-09
 
-The "wait, why aren't they in the same room?" release. The first time two coding agents — one in `~/projects/api`, one in `~/projects/web` — actually see each other on the default config.
+The "wait, why aren't they in the same room?" patch. The first time two coding agents — one in `~/projects/api`, one in `~/projects/web` — actually see each other on the default config.
 
-### Changed (breaking)
+### Changed (breaking default — pre-1.0, no API removed)
 - **Default DB path moved from `./.intermind/state.db` to `~/.intermind/state.db`.** The old default put every project in its own room, which silently broke the most common setup (one agent per repo, two repos in one product). The new default is global per machine; per-project rooms are still a one-line opt-in via `INTERMIND_DB=./.intermind/state.db`. Anyone who was relying on the old behaviour needs to set that env var explicitly. Tools, message format, schema — all unchanged.
 
 ### Added
@@ -50,6 +50,6 @@ First public release. Everything Intermind does today ships in this version. The
 - **Conversation-only.** No tasks, no shared key/value store, no first-class diff/review types, no working-tree mutation.
 - MCP-only. Not A2A. No web UI.
 
-[Unreleased]: https://github.com/monkfromearth/intermind/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/monkfromearth/intermind/releases/tag/v0.1.0
+[Unreleased]: https://github.com/monkfromearth/intermind/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/monkfromearth/intermind/releases/tag/v0.0.2
 [0.0.1]: https://github.com/monkfromearth/intermind/releases/tag/v0.0.1

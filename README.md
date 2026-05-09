@@ -598,7 +598,7 @@ If you want any of those, see [`CONTRIBUTING.md`](./CONTRIBUTING.md) and [`ROADM
 <summary><b>Does this work over the network?</b></summary>
 <br>
 
-No. 0.1.0 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` is one file per machine, so it covers "two agents on my laptop" but stops there. Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
+No. 0.0.2 is stdio-only and assumes local trust (same machine, same user). The default `~/.intermind/state.db` is one file per machine, so it covers "two agents on my laptop" but stops there. Cross-machine support via Streamable HTTP is in [`ROADMAP.md`](./ROADMAP.md) under "later" — no schedule.
 
 </details>
 

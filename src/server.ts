@@ -81,8 +81,8 @@ export function buildServer(
   opts: BuildServerOptions = {},
 ): McpServer {
   // Single source of truth for the server version is package.json;
-  // bun:sqlite/Bun let us require() it at build time so the compiled
-  // binary reports the real version (0.0.1) instead of a stale string.
+  // Bun lets us require() it at build time so the compiled binary
+  // reports the real version (e.g. 0.0.2) instead of a stale string.
   const { version } = require("../package.json") as { version: string };
   const server = new McpServer({ name: "intermind", version });
 

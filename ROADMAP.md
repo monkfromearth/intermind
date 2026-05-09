@@ -8,7 +8,7 @@ Where Intermind is going, in plain English. This is a living document — open a
 2. **The loop matters more than the surface.** Until two real coding agents have held a productive conversation through Intermind on a non-toy project, no new features.
 3. **One bag, not many.** The working product ships as a single set of tools; new releases are tweaks, not new "lines."
 
-## Now — shipped in 0.1.0
+## Now — shipped in 0.0.2
 
 What's in the box today:
 
@@ -25,7 +25,7 @@ What's in the box today:
 
 Things that have come up. None are scheduled, most never will be. We add them only when a real workflow asks for it.
 
-- **Streamable HTTP transport.** The 0.1.0 default room (`~/.intermind/state.db`) is shared across every project on the same machine, but it stops at the machine boundary. HTTP would let agents on different laptops — or a cloud agent and a local one — join the same room. Bigger lift than it looks: per-agent tokens enforced over the wire, TLS via reverse proxy, rate limits, lifecycle for a real long-running daemon.
+- **Streamable HTTP transport.** The 0.0.2 default room (`~/.intermind/state.db`) is shared across every project on the same machine, but it stops at the machine boundary. HTTP would let agents on different laptops — or a cloud agent and a local one — join the same room. Bigger lift than it looks: per-agent tokens enforced over the wire, TLS via reverse proxy, rate limits, lifecycle for a real long-running daemon.
 - **npm publish + `npx intermind`.** Works today via `bun install -g github:...`, but a registered package is friendlier for non-Bun users. Needs a Node-compatible build step (the bin currently has a `#!/usr/bin/env bun` shebang).
 - **Resources** (`agents://`, `threads://thr_X`) so agents can browse history without a tool call.
 - **Read receipts and presence pings.** Easy to add as message metadata; only worth it if real workflows ask.

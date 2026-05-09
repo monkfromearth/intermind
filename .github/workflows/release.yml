@@ -163,9 +163,12 @@ jobs:
         # --access public is required for unscoped first-time publishes.
         # --provenance attests the build to the public sigstore log so
         #   downstream users can verify the tarball came from this repo.
+        # Auth: npm Trusted Publishing (OIDC). The `id-token: write`
+        # permission at the top of this file lets the runner exchange
+        # its GitHub OIDC token for a short-lived npm publish token, so
+        # we don't need an NPM_TOKEN secret.
+        # See https://docs.npmjs.com/trusted-publishers.
         if: steps.check_npm.outputs.already_published == 'false'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public --provenance
 
   release:

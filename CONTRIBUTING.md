@@ -2,9 +2,9 @@
 
 Thanks for taking a look. Intermind is small on purpose, so there's a high bar for "more code." Read this before opening a PR.
 
-## What is in this release, and what is not't
+## What is in this release, and what is not
 
-Intermind 0.0.1 is **just messaging between coding agents**. Six tools, a thread model, an SQLite file. Nothing else.
+Intermind today is **just messaging between coding agents**. Six tools, a thread model, an SQLite file. Nothing else.
 
 We will say no to:
 
@@ -28,7 +28,7 @@ bun install
 
 bun test           # runs all unit + integration tests against an in-memory SQLite
 bun run typecheck  # tsc --noEmit, no emit
-bun run start      # starts the stdio server (default DB at ./.intermind/state.db)
+bun run start      # starts the stdio server (default DB at ~/.intermind/state.db)
 ```
 
 ## Testing
@@ -67,6 +67,32 @@ When opening an issue, please include:
 2. Which MCP client you're using (Claude Code, Codex, etc.) and its version.
 3. The exact tool call that misbehaved, plus what you expected vs. what happened.
 4. If reproducible, a minimal script using the in-memory transport (see `test/server.test.ts` for the pattern).
+
+## Releasing
+
+Releases are branch-driven. Every push to `release` runs [`.github/workflows/release.yml`](./.github/workflows/release.yml), which fans out to every distribution channel in parallel: npm (source tarball), a GitHub Release, and four single-file binaries (`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64`).
+
+Maintainer-only checklist for a new version:
+
+1. **Bump the version on `main`.** Edit `package.json` (e.g. `0.0.2` → `0.0.3`) and the `## [Unreleased]` section in `CHANGELOG.md` (rename it to `## [0.0.3] — YYYY-MM-DD`, add a fresh empty `## [Unreleased]` block at the top, update the link references at the bottom of the file). Commit on `main`.
+2. **Promote `main` to `release`.** Fast-forward the `release` branch to the same commit and push:
+   ```bash
+   git checkout release
+   git merge --ff-only main
+   git push origin release
+   ```
+3. **Watch the workflow.** It does the rest: `npm publish` (Trusted Publishing — see below), creates the `vX.Y.Z` git tag, attaches the four binaries to the GitHub Release, and generates release notes from the commit log.
+4. **Re-runs are safe.** Every step is idempotent — if the npm version is already published or the tag/release already exists, that step no-ops instead of failing. So a stuck binary build can be re-run without rolling anything back.
+
+### npm Trusted Publishing — no token required
+
+We authenticate to npm via [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), so there is no `NPM_TOKEN` secret to rotate. The workflow declares `id-token: write` permission, which lets the GitHub runner exchange its OIDC identity for a short-lived npm publish token at run time. The trust relationship is configured once on npmjs.com under the `intermind` package settings, pointing at this repo + `release.yml` + the `npm-publish` job. Anyone re-creating that link needs to be a package owner on npm.
+
+### What ships in each channel
+
+- **npm** — source tarball with `bin: ./src/index.ts`, runnable as `bunx intermind`. Anyone with Bun ≥ 1.1 can install it.
+- **GitHub Release binaries** — `bun build --compile` artifacts, ~60 MB each, one per OS/arch combo. macOS binaries are ad-hoc codesigned (`codesign --sign -`) so Gatekeeper doesn't kill them on download. Users without Bun can `curl` the right asset and run it directly.
+- **Git tag (`vX.Y.Z`)** — created by the release job, points at the commit that triggered the run.
 
 ## Security
 
