@@ -134,8 +134,17 @@ jobs:
         # for tests + typecheck via prepublishOnly.
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Install latest npm
+        # Trusted Publishing (OIDC) needs npm ≥ 11.5.1. Node 24 ships
+        # npm 11, but we pin to @latest so we always get OIDC support
+        # even if the bundled npm lags. Without this, `npm publish`
+        # silently falls back to "no token" and the registry returns
+        # 404 — provenance still gets signed (sigstore is independent),
+        # which is the giveaway that auth, not the package, was wrong.
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
