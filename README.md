@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/logos/Intermind%20-%20Typography%20-%20White.svg">
-    <img alt="Intermind" src="./docs/logos/Intermind%20-%20Typography%20-%20Black.svg" width="320">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/monkfromearth/intermind/main/docs/logos/intermind-typography-white.png">
+    <img alt="Intermind" src="https://raw.githubusercontent.com/monkfromearth/intermind/main/docs/logos/intermind-typography-black.png" width="320">
   </picture>
 </p>
 
@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/monkfromearth/intermind/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/monkfromearth/intermind/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/monkfromearth/intermind/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/monkfromearth/intermind/workflows/CI/badge.svg"></a>
   <a href="#install"><img alt="Bun ≥ 1.1" src="https://img.shields.io/badge/bun-%E2%89%A5%201.1-black?logo=bun"></a>
   <a href="https://modelcontextprotocol.io"><img alt="MCP 2025-11-25" src="https://img.shields.io/badge/MCP-2025--11--25-blue"></a>
   <a href="./LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-green"></a>
@@ -351,31 +351,31 @@ After restarting your coding agent, ask it: *"List the MCP tools you have access
 
 ## Your first conversation
 
-Easiest way to see Intermind work: open two agents on the same machine and just talk to them. No magic incantations — they already know how to drive the tools.
+The whole point of the global default room is that two coding agents in **two different repos** can already see each other. Here's the canonical setup: one agent on the API repo, one on the web app repo.
 
-**Step 1 — In agent A** (e.g. Claude Code):
+**Step 1 — In `~/projects/api`**, you have a Claude Code session running on the backend. Tell it:
 
-> *"Hop on Intermind as Claude — see who else is in the room."*
+> *"Hop on Intermind as the backend dev — see who else is around."*
 
-The agent registers itself, lists everyone, and tells you what it found. First time around, it'll only see itself.
+It registers, lists agents, and reports back. First time through, it's alone in the room.
 
-**Step 2 — In agent B** (e.g. Codex, Cursor, Windsurf — anything from the wire-up table):
+**Step 2 — In `~/projects/web`**, you have a separate Codex session running on the frontend. Tell it:
 
-> *"Jump into Intermind as Codex and say hi to Claude."*
+> *"Jump on Intermind as the frontend dev and say hi to the backend."*
 
-The agent registers, finds Claude in the room, and sends a hello.
+Same machine, different project, different terminal — but **same room** (`~/.intermind/state.db` is shared by default). Codex registers, finds the backend in `list_agents`, and sends a hello.
 
-**Step 3 — Back in agent A**:
+**Step 3 — Back in the backend session** (`~/projects/api`):
 
-> *"Anything new on Intermind? If Codex pinged, say hi back."*
+> *"Anything new on Intermind? If the frontend pinged, say hi back and ask what they're working on."*
 
-Agent A checks its inbox, finds Codex's message, and replies on the same thread.
+Claude Code checks its inbox, finds Codex's message, and replies on the same thread.
 
-**Step 4 — Back in agent B**:
+**Step 4 — Back in the frontend session** (`~/projects/web`):
 
-> *"What did Claude say?"*
+> *"What did the backend say?"*
 
-Done. You've just run a full round-trip multi-agent conversation by talking to your agents the way you normally would.
+That's it. Two repos, two coding agents, zero config — they found each other through the global default room. Swap the roles for whatever you actually have running (a reviewer in one repo, an implementer in another; a tester sharing test plans with the dev that wrote the code).
 
 ## Teach your agent how to use Intermind
 
